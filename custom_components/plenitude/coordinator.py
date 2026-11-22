@@ -49,6 +49,7 @@ from .api import (
     PlenitudeError,
     PlenitudeSessionExpired,
     Supply,
+    safe_error,
 )
 from .bands import BANDS, band
 from .const import (
@@ -229,7 +230,7 @@ class PlenitudeCoordinator(DataUpdateCoordinator[PlenitudeData]):
         except PlenitudeAuthError as err:
             # Gigya codes 401xxx and 403xxx: credentials refused, CAPTCHA, locked account. Asking the user is
             # the only way out; anything else (5xxxxx) is temporary.
-            placeholders = {"error": str(err)}
+            placeholders = {"error": safe_error(err)}
             if err.code // 1000 in (401, 403):
                 raise ConfigEntryAuthFailed(
                     translation_domain=DOMAIN, translation_key="login_refused", translation_placeholders=placeholders
@@ -321,7 +322,7 @@ class PlenitudeCoordinator(DataUpdateCoordinator[PlenitudeData]):
                 raise UpdateFailed(
                     translation_domain=DOMAIN,
                     translation_key="communication_error",
-                    translation_placeholders={"error": str(err) or type(err).__name__},
+                    translation_placeholders={"error": safe_error(err)},
                 ) from err
 
     async def _sync(self) -> PlenitudeData:

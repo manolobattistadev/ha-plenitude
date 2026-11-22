@@ -30,10 +30,11 @@
     },
     "error": {
       "invalid_auth": "Credentials refused by Plenitude (or an additional verification is required).",
-      "cannot_connect": "Cannot reach the Plenitude customer area.",
+      "cannot_connect": "Cannot reach the Plenitude customer area (the reason is in the Home Assistant log).",
       "no_supplies": "The account has no electricity supply with the consumption analysis.",
       "supply_missing": "The configured supply is no longer in this account.",
-      "unknown": "Unexpected error: see the Home Assistant log."
+      "unknown": "Unexpected error: see the Home Assistant log.",
+      "portal_refused": "Plenitude accepted the login, but the customer area refuses the data of the account for now. Check that the customer area works in a browser, then try again later."
     },
     "abort": {
       "already_configured": "This supply is already configured.",

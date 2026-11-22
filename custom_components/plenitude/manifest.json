@@ -1,14 +1,24 @@
 {
   "domain": "plenitude",
   "name": "Eni Plenitude",
-  "after_dependencies": ["frontend", "http"],
-  "codeowners": ["@paoloaq"],
+  "after_dependencies": [
+    "frontend",
+    "http"
+  ],
+  "categories": [
+    "energy.meters_monitoring"
+  ],
+  "codeowners": [
+    "@paoloaq"
+  ],
   "config_flow": true,
-  "dependencies": ["recorder"],
+  "dependencies": [
+    "recorder"
+  ],
   "documentation": "https://github.com/paoloaq/ha-plenitude",
   "integration_type": "service",
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/paoloaq/ha-plenitude/issues",
   "requirements": [],
-  "version": "0.3.0"
+  "version": "0.3.1"
 }

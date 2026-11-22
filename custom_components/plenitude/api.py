@@ -152,6 +152,12 @@ def safe_path(path: str) -> str:
     return re.sub(r"\d{5,}", "…", path)
 
 
+def safe_error(err: BaseException) -> str:
+    """Text of an error for logs and messages: no query strings, long numbers (customer codes) masked."""
+    text = str(err) or type(err).__name__
+    return re.sub(r"\d{5,}", "…", re.sub(r"\?[^\s'\"]*", "", text))
+
+
 def _utc_iso(moment: datetime) -> str:
     return moment.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S.000Z")
 

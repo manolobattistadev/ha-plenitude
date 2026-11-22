@@ -6,7 +6,7 @@ import hashlib
 from datetime import timedelta
 
 DOMAIN = "plenitude"
-VERSION = "0.3.0"
+VERSION = "0.3.1"
 
 # Cards (frontend/plenitude-cards.js), served by the integration and loaded by the frontend.
 CARDS_URL = "/plenitude_static"

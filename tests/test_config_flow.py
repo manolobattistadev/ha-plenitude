@@ -10,7 +10,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.plenitude.api import PlenitudeAuthError, Supply
+from custom_components.plenitude.api import PlenitudeAuthError, PlenitudeSessionExpired, Supply
 from custom_components.plenitude.bands import PRICE_MODE
 from custom_components.plenitude.const import CONF_SUPPLY, DOMAIN, supply_key
 
@@ -66,6 +66,7 @@ async def test_two_supplies(hass: HomeAssistant) -> None:
     [
         (PlenitudeAuthError(403042, "Invalid LoginID"), None, "invalid_auth"),
         (TimeoutError(), None, "cannot_connect"),
+        (PlenitudeSessionExpired("/api/contiServices/conti/…/lista-forniture: HTTP 401"), None, "portal_refused"),
         (None, [], "no_supplies"),
     ],
 )

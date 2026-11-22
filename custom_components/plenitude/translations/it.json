@@ -30,10 +30,11 @@
     },
     "error": {
       "invalid_auth": "Credenziali rifiutate da Plenitude (o richiesta una verifica aggiuntiva).",
-      "cannot_connect": "Impossibile contattare l'area clienti Plenitude.",
+      "cannot_connect": "Impossibile contattare l'area clienti Plenitude (il motivo è nel log di Home Assistant).",
       "no_supplies": "Nell'account non c'è una fornitura luce con l'analisi dei consumi.",
       "supply_missing": "La fornitura configurata non è più in questo account.",
-      "unknown": "Errore inatteso: vedi il log di Home Assistant."
+      "unknown": "Errore inatteso: vedi il log di Home Assistant.",
+      "portal_refused": "Plenitude ha accettato il login, ma per ora l'area clienti rifiuta i dati del conto. Controlla che l'area clienti funzioni da un browser, poi riprova più tardi."
     },
     "abort": {
       "already_configured": "Questa fornitura è già configurata.",

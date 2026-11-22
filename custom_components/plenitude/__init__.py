@@ -18,7 +18,7 @@ from homeassistant.helpers.typing import ConfigType
 from homeassistant.helpers.update_coordinator import UpdateFailed
 
 from . import websocket
-from .api import PlenitudeError
+from .api import PlenitudeError, safe_error
 from .const import CARDS_FILE, CARDS_URL, DOMAIN
 from .coordinator import PlenitudeConfigEntry, PlenitudeCoordinator, cost_items
 
@@ -67,7 +67,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PlenitudeConfigEntry) ->
         raise ConfigEntryNotReady(
             translation_domain=DOMAIN,
             translation_key="communication_error",
-            translation_placeholders={"error": str(err) or type(err).__name__},
+            translation_placeholders={"error": safe_error(err)},
         ) from err
     entry.runtime_data = coordinator
     entry.async_on_unload(_reload_when_costs_change(hass, entry))

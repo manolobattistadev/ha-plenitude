@@ -4,6 +4,16 @@ All notable changes to this project are listed here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [semantic versioning](https://semver.org/).
 
+## [0.3.1] - 2026-11-22
+
+### Fixed
+- Configuration: when Plenitude accepts the login but the customer area refuses the data of the account, the
+  form now says so (*portal refused*) instead of *cannot connect*, and the reason is written to the log (with
+  query strings and long numbers removed).
+
+### Changed
+- `manifest.json`: category `energy.meters_monitoring`.
+
 ## [0.3.0] - 2026-11-22
 
 ### Added
@@ -49,6 +59,7 @@ All notable changes to this project are listed here. The format follows
   single price or prices by band.
 - Sensors of the last day with data.
 
+[0.3.1]: https://github.com/paoloaq/ha-plenitude/releases/tag/v0.3.1
 [0.3.0]: https://github.com/paoloaq/ha-plenitude/releases/tag/v0.3.0
 [0.2.0]: https://github.com/paoloaq/ha-plenitude/releases/tag/v0.2.0
 [0.1.0]: https://github.com/paoloaq/ha-plenitude/releases/tag/v0.1.0

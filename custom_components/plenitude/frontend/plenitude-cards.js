@@ -17,7 +17,7 @@
  * and hand-drawn SVG. Text that comes from outside (category names) is always set with textContent.
  */
 
-const CARD_VERSION = "0.3.0";
+const CARD_VERSION = "0.3.1";
 
 // ------------------------------------------------------------------------------------------- language
 
