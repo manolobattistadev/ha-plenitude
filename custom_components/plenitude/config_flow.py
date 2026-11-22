@@ -35,6 +35,7 @@ from homeassistant.helpers.selector import (
 from .api import PlenitudeAuthError, PlenitudeClient, PlenitudeError, PlenitudeSessionExpired, Supply, safe_error
 from .bands import PRICE_FIELDS, PRICE_MODE, PRICE_MODES, PRICE_NONE
 from .const import CONF_SUPPLY, DOMAIN, supply_key
+from .const import VERSION as INTEGRATION_VERSION
 from .coordinator import PlenitudeConfigEntry
 from .costs import (
     COST_AMOUNT,
@@ -120,18 +121,22 @@ class PlenitudeConfigFlow(ConfigFlow, domain=DOMAIN):
         try:
             supplies = await _electric_supplies(self.hass, email, password)
         except PlenitudeAuthError as err:
-            _LOGGER.warning("Plenitude refused the login: %s", safe_error(err))
+            _LOGGER.warning("Plenitude %s: login refused by Plenitude: %s", INTEGRATION_VERSION, safe_error(err))
             return [], "invalid_auth"
         except PlenitudeSessionExpired as err:
             # Login accepted, but the customer area refuses the data of the account (seen on 2026-11-22: HTTP 401
             # from every service of the account right after a new login, while older sessions kept working).
-            _LOGGER.warning("Plenitude accepted the login but refused the account data: %s", safe_error(err))
+            _LOGGER.warning(
+                "Plenitude %s: login accepted, but the customer area refused the account data: %s",
+                INTEGRATION_VERSION,
+                safe_error(err),
+            )
             return [], "portal_refused"
         except (PlenitudeError, aiohttp.ClientError, TimeoutError) as err:
-            _LOGGER.warning("Cannot reach Plenitude: %s", safe_error(err))
+            _LOGGER.warning("Plenitude %s: cannot reach the customer area: %s", INTEGRATION_VERSION, safe_error(err))
             return [], "cannot_connect"
         except Exception:
-            _LOGGER.exception("Unexpected error during the Plenitude login")
+            _LOGGER.exception("Plenitude %s: unexpected error during the login", INTEGRATION_VERSION)
             return [], "unknown"
         return supplies, None if supplies else "no_supplies"
 

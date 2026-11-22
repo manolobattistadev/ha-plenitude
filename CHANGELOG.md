@@ -4,6 +4,14 @@ All notable changes to this project are listed here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [semantic versioning](https://semver.org/).
 
+## [0.3.3] - 2026-11-22
+
+### Added
+- Debug log of every request to the customer area: method, host, path with the codes masked, HTTP status, type
+  of the answer and, for errors only, the start of the answer. No query strings, no bodies of successful answers,
+  nothing from Gigya but the status.
+- The messages of the configuration in the log name the version of the integration.
+
 ## [0.3.2] - 2026-11-22
 
 ### Fixed

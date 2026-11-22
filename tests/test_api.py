@@ -1,7 +1,13 @@
 """Identity of the client towards the customer area (User-Agent and headers)."""
 
+import logging
 import re
+from collections.abc import Iterator
 from datetime import date, timedelta
+from types import SimpleNamespace
+
+import pytest
+from yarl import URL
 
 from custom_components.plenitude.api import (
     FIREFOX_DAYS_PER_VERSION,
@@ -10,6 +16,7 @@ from custom_components.plenitude.api import (
     SAME_ORIGIN,
     SAME_SITE,
     PlenitudeClient,
+    _trace,
     user_agent,
 )
 
@@ -65,3 +72,61 @@ def test_extra_headers_override() -> None:
     )
     assert headers["JWT"] == "token"
     assert headers["Referer"] == "https://eniplenitude.com/my-eni"
+
+
+class Records(logging.Handler):
+    """Collects the records of the client's logger (works also with ``-p no:logging``)."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.records: list[logging.LogRecord] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.records.append(record)
+
+    @property
+    def messages(self) -> list[str]:
+        return [record.getMessage() for record in self.records]
+
+
+@pytest.fixture
+def records() -> Iterator[Records]:
+    logger = logging.getLogger("custom_components.plenitude.api")
+    handler, level = Records(), logger.level
+    logger.addHandler(handler)
+    logger.setLevel(logging.DEBUG)
+    yield handler
+    logger.removeHandler(handler)
+    logger.setLevel(level)
+
+
+def fake_response(path: str, status: int, kind: str = "application/json") -> SimpleNamespace:
+    return SimpleNamespace(
+        method="GET",
+        url=URL(f"https://eniplenitude.com{path}?logHash=abc&codiceContoCliente=123456789"),
+        status=status,
+        headers={"Content-Type": f"{kind};charset=UTF-8"},
+    )
+
+
+def test_debug_trace_masks_the_codes(records: Records) -> None:
+    path = "/serviceDAp/api/contiServices/conti/123456789/lista-forniture"
+    _trace(fake_response(path, 401), '{"error":\n "Unauthorized"}')
+    _trace(fake_response("/serviceDAp/api/c360/init", 200))
+    assert records.messages == [
+        "GET eniplenitude.com/serviceDAp/api/contiServices/conti/…/lista-forniture: HTTP 401 application/json"
+        ' | {"error": "Unauthorized"}',
+        "GET eniplenitude.com/serviceDAp/api/c360/init: HTTP 200 application/json",
+    ]
+    assert not any("123456789" in m or "logHash" in m for m in records.messages)
+
+
+def test_debug_trace_shortens_long_answers(records: Records) -> None:
+    _trace(fake_response("/serviceDAp/api/c360/init", 200, "text/html"), "<html>" + "x" * 1000 + " 9876543210")
+    assert len(records.messages[0].split(" | ")[1]) == 300
+
+
+def test_no_trace_without_debug(records: Records) -> None:
+    logging.getLogger("custom_components.plenitude.api").setLevel(logging.INFO)
+    _trace(fake_response("/serviceDAp/api/c360/init", 401), "body")
+    assert not records.records

@@ -236,6 +236,11 @@ Per segnalare una vulnerabilità vedi [SECURITY.md](SECURITY.md).
       custom_components.plenitude: debug
   ```
   L'integrazione non scrive credenziali né token nel log; leggilo comunque prima di condividerlo.
+
+  Se il problema avviene mentre aggiungi l'integrazione (quindi la sua pagina non esiste ancora), accendi il log
+  di debug da **Strumenti per sviluppatori → Azioni** con l'azione `logger.set_level` e i dati
+  `custom_components.plenitude: debug`, poi riprova. Ogni richiesta viene scritta con il suo stato HTTP; i codici
+  del conto sono mascherati.
 - **"Plenitude ha rifiutato il login".** La password è cambiata, o Plenitude chiede una verifica aggiuntiva.
   Accedi all'area clienti con un browser, poi apri la richiesta di nuovo accesso in **Impostazioni → Dispositivi
   e servizi** e inserisci la password.

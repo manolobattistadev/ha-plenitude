@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 import re
 import secrets
 import string
@@ -45,6 +46,7 @@ FIREFOX_DAYS_PER_VERSION = 30
 SAME_ORIGIN = "same-origin"  # Sec-Fetch-Site of the portal services, called by the page on eniplenitude.com
 SAME_SITE = "same-site"  # Sec-Fetch-Site of Gigya, on login.eniplenitude.com
 PORTAL_SESSION_COOKIES = ("GYSESSION", "G-GENUI")
+_LOGGER = logging.getLogger(__name__)
 _ALPHABET = string.digits + string.ascii_lowercase + string.ascii_uppercase
 
 # Values of the "type" field of analysis/consumptions and the "view" the server answers with.
@@ -169,6 +171,21 @@ def safe_error(err: BaseException) -> str:
     """Text of an error for logs and messages: no query strings, long numbers (customer codes) masked."""
     text = str(err) or type(err).__name__
     return re.sub(r"\d{5,}", "…", re.sub(r"\?[^\s'\"]*", "", text))
+
+
+def _trace(resp: aiohttp.ClientResponse, answer: str | None = None) -> None:
+    """Debug log of one request: method, host, path with the codes masked, status and type of the answer.
+
+    ``answer`` (only for errors) is the start of the body, whitespace collapsed and long numbers masked: the
+    error answers of the portal are generic (``{"error":"Unauthorized"}``, pages of the firewall).
+    """
+    if not _LOGGER.isEnabledFor(logging.DEBUG):
+        return
+    kind = resp.headers.get("Content-Type", "-").split(";")[0]
+    line = f"{resp.method} {resp.url.host}{safe_path(resp.url.path)}: HTTP {resp.status} {kind}"
+    if answer is not None:
+        line += " | " + re.sub(r"\d{5,}", "…", " ".join(answer.split()))[:300]
+    _LOGGER.debug(line)
 
 
 def _utc_iso(moment: datetime) -> str:
@@ -300,6 +317,7 @@ class PlenitudeClient:
         headers = self._headers(SAME_SITE, "POST")
         async with self._session.post(f"{GIGYA_BASE}/{method}", data=payload, headers=headers) as resp:
             text = await resp.text()
+            _trace(resp)  # never the body: it contains the tokens
         try:
             result = json.loads(text)
         except json.JSONDecodeError as err:
@@ -318,6 +336,9 @@ class PlenitudeClient:
         async with self._session.request(
             method, f"{SERVICE_BASE}{path}", params=query, json=body, headers=headers, allow_redirects=False
         ) as resp:
+            failed = resp.status >= 300 or (resp.status != 204 and "json" not in resp.headers.get("Content-Type", ""))
+            debug = failed and _LOGGER.isEnabledFor(logging.DEBUG)
+            _trace(resp, await resp.text(errors="replace") if debug else None)
             # 406 is what the portal answers after about an hour of inactivity (measured 2026-11-22).
             if resp.status in (301, 302, 303, 307, 308, 401, 403, 406):
                 raise PlenitudeSessionExpired(f"{safe_path(path)}: HTTP {resp.status}")
@@ -340,8 +361,10 @@ class PlenitudeClient:
 
     async def login(self, email: str, password: str, session_expiration: int = 3000) -> dict[str, int]:
         """Full login with the credentials. Returns the lifetimes observed (seconds)."""
+        _LOGGER.debug("Signing in as %s", user_agent())
         # Landing page: the F5 application firewall sets its TS* cookies here.
         async with self._session.get(PAGE_URL, headers=self._page_headers()) as resp:
+            _trace(resp)
             resp.raise_for_status()
         # Gigya bootstrap: device cookies (gmid, ucid) used by Gigya's risk assessment.
         async with self._session.get(
@@ -349,6 +372,7 @@ class PlenitudeClient:
             params={"apiKey": GIGYA_API_KEY, "pageURL": PAGE_URL, "sdk": "js_latest", "format": "json"},
             headers=self._headers(SAME_SITE),
         ) as resp:
+            _trace(resp)
             await resp.text()
         result = await self._gigya(
             "accounts.login",
@@ -396,6 +420,8 @@ class PlenitudeClient:
             params={"channel": "PORTAL", "logHash": self._log_hash()},
             headers=self._headers(SAME_ORIGIN, extra={"JWT": self._last_jwt, "Referer": PAGE_URL}),
         ) as resp:
+            debug = resp.status >= 400 and _LOGGER.isEnabledFor(logging.DEBUG)
+            _trace(resp, await resp.text(errors="replace") if debug else None)
             if resp.status in (401, 403):
                 raise PlenitudeSessionExpired(f"getJwe: HTTP {resp.status}")
             resp.raise_for_status()
