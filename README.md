@@ -14,7 +14,10 @@ nella dashboard Energia. Funziona con ogni tipo di installazione di Home Assista
 - [x] Prototipo provato dal Mac (2026-11-22): login da script senza CAPTCHA, quarti d'ora di un giorno
 - [x] Portale scaduto dopo meno di 55 minuti di inattività (`406`), rinnovato senza password (2026-11-22)
 - [ ] Tenuta della sessione Gigya di 30 giorni oltre le 24 ore (`prototipo.py stato` nei prossimi giorni)
-- [ ] Integrazione: configurazione guidata, ri-autenticazione, import delle statistiche, HACS
+- [ ] Integrazione: configurazione guidata, ri-autenticazione (password come riserva della sessione Gigya),
+      import delle statistiche orarie, per fascia F1/F2/F3 e per categoria stimata (giornaliere), costo, HACS
+- [ ] Card del grafico distribuita con l'integrazione: periodo di default configurabile, selettore sulla card
+- [ ] Prezzo al kWh: le API viste non lo danno (solo importi delle bollette); per ora va inserito nelle opzioni
 
 ## Comportamento dei dati (verificato il 2026-11-22)
 - Storico quartorario dal **4 gennaio 2026**; i dati arrivano con circa **2 giorni** di ritardo.
