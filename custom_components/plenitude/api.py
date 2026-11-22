@@ -34,10 +34,16 @@ PORTAL_BASE = "https://eniplenitude.com"
 SERVICE_BASE = f"{PORTAL_BASE}/serviceDAp"
 PAGE_URL = f"{PORTAL_BASE}/my-eni"
 ROME = ZoneInfo("Europe/Rome")
-USER_AGENT = (
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-)
+# Browser identity. Measured on 2026-11-22: with the User-Agent of Chrome 131 (sent without the client hints a
+# real Chrome adds) the account services answered HTTP 401 to new sessions; with the one of Firefox 160, every
+# other request unchanged, they answer. The client presents itself as the Firefox of that day and advances one
+# major version every 30 days: Firefox ships one about every four weeks, so the version stays close to the
+# current release without getting ahead of it.
+FIREFOX_VERSION = 160
+FIREFOX_VERSION_DATE = date(2026, 11, 22)
+FIREFOX_DAYS_PER_VERSION = 30
+SAME_ORIGIN = "same-origin"  # Sec-Fetch-Site of the portal services, called by the page on eniplenitude.com
+SAME_SITE = "same-site"  # Sec-Fetch-Site of Gigya, on login.eniplenitude.com
 PORTAL_SESSION_COOKIES = ("GYSESSION", "G-GENUI")
 _ALPHABET = string.digits + string.ascii_lowercase + string.ascii_uppercase
 
@@ -147,6 +153,13 @@ def token_lifetime(jwt: str) -> int:
     return int(claims["exp"]) - int(claims["iat"])
 
 
+def user_agent(today: date | None = None) -> str:
+    """User-Agent of a current Firefox on macOS (see ``FIREFOX_VERSION``)."""
+    days = max(0, ((today or date.today()) - FIREFOX_VERSION_DATE).days)
+    version = FIREFOX_VERSION + days // FIREFOX_DAYS_PER_VERSION
+    return f"Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:{version}.0) Gecko/20100101 Firefox/{version}.0"
+
+
 def safe_path(path: str) -> str:
     """Path for error messages and logs: account and customer codes (5+ digits) are masked."""
     return re.sub(r"\d{5,}", "…", path)
@@ -249,18 +262,43 @@ class PlenitudeClient:
         return "".join(secrets.choice(_ALPHABET) for _ in range(22))
 
     @staticmethod
-    def _headers(extra: dict[str, str] | None = None) -> dict[str, str]:
+    def _headers(site: str, method: str = "GET", extra: dict[str, str] | None = None) -> dict[str, str]:
+        """Headers of a request made by the page of the customer area, as Firefox sends them.
+
+        ``site`` is the ``Sec-Fetch-Site`` (``SAME_ORIGIN`` or ``SAME_SITE``). Like the browser, ``Origin`` only
+        on POST, and towards Gigya (another origin) the ``Referer`` reduced to the origin of the page.
+        """
         headers = {
-            "User-Agent": USER_AGENT,
+            "User-Agent": user_agent(),
+            "Accept": "application/json, text/plain, */*" if site == SAME_ORIGIN else "*/*",
             "Accept-Language": "it-IT,it;q=0.9",
-            "Origin": PORTAL_BASE,
-            "Referer": f"{PAGE_URL}/home",
+            "Referer": f"{PAGE_URL}/home" if site == SAME_ORIGIN else f"{PORTAL_BASE}/",
+            "Sec-Fetch-Dest": "empty",
+            "Sec-Fetch-Mode": "cors",
+            "Sec-Fetch-Site": site,
         }
+        if method != "GET":
+            headers["Origin"] = PORTAL_BASE
         return {**headers, **(extra or {})}
+
+    @staticmethod
+    def _page_headers() -> dict[str, str]:
+        """Headers of the navigation to the page of the customer area, as Firefox sends them."""
+        return {
+            "User-Agent": user_agent(),
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "it-IT,it;q=0.9",
+            "Sec-Fetch-Dest": "document",
+            "Sec-Fetch-Mode": "navigate",
+            "Sec-Fetch-Site": "none",
+            "Sec-Fetch-User": "?1",
+            "Upgrade-Insecure-Requests": "1",
+        }
 
     async def _gigya(self, method: str, data: dict[str, str]) -> dict[str, Any]:
         payload = {"APIKey": GIGYA_API_KEY, "sdk": "js_latest", "pageURL": PAGE_URL, "format": "json", **data}
-        async with self._session.post(f"{GIGYA_BASE}/{method}", data=payload, headers=self._headers()) as resp:
+        headers = self._headers(SAME_SITE, "POST")
+        async with self._session.post(f"{GIGYA_BASE}/{method}", data=payload, headers=headers) as resp:
             text = await resp.text()
         try:
             result = json.loads(text)
@@ -276,7 +314,7 @@ class PlenitudeClient:
         self, method: str, path: str, *, params: dict[str, str] | None = None, body: dict[str, Any] | None = None
     ) -> Any:
         query = {**(params or {}), "logHash": self._log_hash(), "channel": "PORTAL"}
-        headers = self._headers({"Accept": "application/json, text/plain, */*"})
+        headers = self._headers(SAME_ORIGIN, method)
         async with self._session.request(
             method, f"{SERVICE_BASE}{path}", params=query, json=body, headers=headers, allow_redirects=False
         ) as resp:
@@ -303,13 +341,13 @@ class PlenitudeClient:
     async def login(self, email: str, password: str, session_expiration: int = 3000) -> dict[str, int]:
         """Full login with the credentials. Returns the lifetimes observed (seconds)."""
         # Landing page: the F5 application firewall sets its TS* cookies here.
-        async with self._session.get(PAGE_URL, headers=self._headers()) as resp:
+        async with self._session.get(PAGE_URL, headers=self._page_headers()) as resp:
             resp.raise_for_status()
         # Gigya bootstrap: device cookies (gmid, ucid) used by Gigya's risk assessment.
         async with self._session.get(
             f"{GIGYA_BASE}/accounts.webSdkBootstrap",
             params={"apiKey": GIGYA_API_KEY, "pageURL": PAGE_URL, "sdk": "js_latest", "format": "json"},
-            headers=self._headers(),
+            headers=self._headers(SAME_SITE),
         ) as resp:
             await resp.text()
         result = await self._gigya(
@@ -356,7 +394,7 @@ class PlenitudeClient:
         async with self._session.get(
             f"{SERVICE_BASE}/api/c360/getJwe",
             params={"channel": "PORTAL", "logHash": self._log_hash()},
-            headers=self._headers({"JWT": self._last_jwt, "Accept": "application/json, text/plain, */*"}),
+            headers=self._headers(SAME_ORIGIN, extra={"JWT": self._last_jwt, "Referer": PAGE_URL}),
         ) as resp:
             if resp.status in (401, 403):
                 raise PlenitudeSessionExpired(f"getJwe: HTTP {resp.status}")

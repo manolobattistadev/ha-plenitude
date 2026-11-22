@@ -4,6 +4,14 @@ All notable changes to this project are listed here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [semantic versioning](https://semver.org/).
 
+## [0.3.2] - 2026-11-22
+
+### Fixed
+- New sign-ins: the customer area accepted the login but refused the data of the account (HTTP 401 from the
+  account services, *portal refused* in the configuration). The client presented itself as Chrome 131; it now
+  presents itself as a current Firefox, with the `Sec-Fetch-*` headers the browser sends and `Origin` only on
+  POST requests. The Firefox version advances by itself over time.
+
 ## [0.3.1] - 2026-11-22
 
 ### Fixed
