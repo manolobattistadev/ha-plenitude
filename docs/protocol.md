@@ -18,26 +18,36 @@ Steps 2 and 3 can be repeated without the password while the Gigya session is al
 Gigya error codes `401xxx` and `403xxx` (wrong credentials, CAPTCHA required, locked account) need the user;
 `5xxxxx` are temporary. In Home Assistant the first start a re-authentication, the second a retry.
 
-### Open logins and sign-out
-The account services (`contiServices`, `profilo-energetico-services`) answer `HTTP 401` with a generic
-`{"timestamp":…,"status":401,"error":"Unauthorized","path":…}` to the logins opened while too many are open on
-the account; `c360/init` keeps answering, and so do the logins opened before. Renewing the portal session
-(`getJWT` + `getJwe`) does not help: the refusal belongs to the Gigya login. Measured on 2026-11-22: after a day
-of tests without sign-out new logins were refused; they worked again about 50 minutes later (the Gigya sessions
-of the tests lasted 3000 s), and at once after closing an open login.
+### Session cookies and the `Expires` format
+`getJwe` sets the portal cookies with `Path=/`, but writes `Expires` without the comma after the day:
 
-Sign-out, as the web app does it:
+```
+Set-Cookie: GYSESSION=…; Max-Age=86400; Expires=Mon   23 Nov 2026 20:20:54 GMT; Path=/; Secure; HttpOnly
+```
+
+The cookie parser of aiohttp before 3.14.5 (Home Assistant 2026.9 ships 3.14.3) does not recognise that date and
+loses the attributes after it: `GYSESSION` and `G-GENUI` get the default path `/serviceDAp/api/c360`, so they are
+sent to `c360/init` but not to `contiServices` or `profilo-energetico-services`, which answer `HTTP 401`
+(`{"timestamp":…,"status":401,"error":"Unauthorized","path":…}`). aiohttp 3.14.5 parses the date. The client
+brings the portal cookies back to `/` after each answer (`api._fix_cookie_paths`).
+
+Found on 2026-11-22 by comparing, request by request, the cookies sent by the two versions; checked in the official
+image of Home Assistant 2026.9.4 (version 0.3.4: 401; with the fix: 200, a few seconds apart). Two earlier
+explanations of the same 401 (the User-Agent in 0.3.2, the number of open logins in 0.3.4) were wrong: they
+coincided with switching between test environments with aiohttp 3.14.3 and 3.14.5.
+
+### Sign-out
+As the web app does it:
 1. Gigya `accounts.logout` with the `login_token`;
 2. `POST serviceDAp/api/action/logout?logHash={hash}` with body `{"logHash": "{hash}", "codiceCliente": "{cliente}"}`
    and the headers `Cache-Control: Clear-Site-Data` and `Isbeta: true`;
 3. the web app then deletes the cookies `JBFFSESSIONID`, `PORTAL_VERSION`, `X-CSRF-TOKEN`, `JSESSIONID`.
 
 The integration closes the login of the configuration at once, keeps one login (30 days) per entry, closes it
-when it is refused or when the entry is removed, and does not sign in with the password more than once every 15
-minutes.
+when the portal refuses it or when the entry is removed, and does not sign in with the password more than once
+every 15 minutes.
 
-The client presents itself as a current Firefox (`api.user_agent`, `Sec-Fetch-*`, `Origin` only on POST). On
-2026-11-22 this looked like the fix, but it was a coincidence with the expiry of the logins of the tests.
+The client presents itself as a current Firefox (`api.user_agent`, `Sec-Fetch-*`, `Origin` only on POST).
 
 ## Sessions (measured on 2026-11-22)
 | Element | Lifetime | Renewal |

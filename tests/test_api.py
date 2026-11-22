@@ -4,8 +4,10 @@ import logging
 import re
 from collections.abc import Iterator
 from datetime import date, timedelta
+from http.cookies import SimpleCookie
 from types import SimpleNamespace
 
+import aiohttp
 import pytest
 from yarl import URL
 
@@ -130,3 +132,39 @@ def test_no_trace_without_debug(records: Records) -> None:
     logging.getLogger("custom_components.plenitude.api").setLevel(logging.INFO)
     _trace(fake_response("/serviceDAp/api/c360/init", 401), "body")
     assert not records.records
+
+
+# Set-Cookie of getJwe as the portal writes them (values replaced): Expires without the comma after the day.
+GETJWE_COOKIES = [
+    "GYSESSION=abc+DEF/123==; Max-Age=86400; Expires=Mon   23 Nov 2026 20:20:54 GMT; Path=/; Secure; HttpOnly",
+    "G-GENUI=ghi+JKL/456==; Max-Age=86400; Expires=Mon   23 Nov 2026 20:20:54 GMT; Domain=eniplenitude.com; "
+    "Path=/; Secure; HttpOnly",
+    "TS01dc4fc6=0123456789abcdef; Path=/; Secure; HttpOnly; SameSite=Strict",
+]
+GETJWE = URL("https://eniplenitude.com/serviceDAp/api/c360/getJwe")
+SUPPLIES = URL("https://eniplenitude.com/serviceDAp/api/contiServices/conti/123/lista-forniture")
+
+
+async def test_session_cookies_reach_every_service() -> None:
+    """With aiohttp before 3.14.5 the cookies of getJwe lose Path=/; after the fix every service gets them."""
+    async with aiohttp.ClientSession(cookie_jar=aiohttp.CookieJar()) as session:
+        client = PlenitudeClient(session)
+        session.cookie_jar.update_cookies_from_headers(GETJWE_COOKIES, GETJWE)
+        client._fix_cookie_paths()
+        sent = session.cookie_jar.filter_cookies(SUPPLIES)
+        assert {"GYSESSION", "G-GENUI", "TS01dc4fc6"} <= set(sent)
+        assert sent["GYSESSION"].value == "abc+DEF/123=="
+        assert len([c for c in session.cookie_jar if c.key == "GYSESSION"]) == 1
+
+
+async def test_newer_cookie_on_root_wins() -> None:
+    async with aiohttp.ClientSession(cookie_jar=aiohttp.CookieJar()) as session:
+        client = PlenitudeClient(session)
+        old = SimpleCookie()
+        old["GAESA"] = "old"
+        old["GAESA"]["path"] = "/serviceDAp/api/c360"
+        session.cookie_jar.update_cookies(old, GETJWE)
+        session.cookie_jar.update_cookies({"GAESA": "new"}, URL("https://eniplenitude.com/"))
+        client._fix_cookie_paths()
+        assert [c.value for c in session.cookie_jar if c.key == "GAESA"] == ["new"]
+        assert session.cookie_jar.filter_cookies(SUPPLIES)["GAESA"].value == "new"

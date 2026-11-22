@@ -31,15 +31,15 @@ from yarl import URL
 
 GIGYA_API_KEY = "4_QsDZw2Yu7M9yCRldyBrBhg"  # public key of the site, visible in the page source
 GIGYA_BASE = "https://login.eniplenitude.com"
-PORTAL_BASE = "https://eniplenitude.com"
+PORTAL_HOST = "eniplenitude.com"
+PORTAL_BASE = f"https://{PORTAL_HOST}"
 SERVICE_BASE = f"{PORTAL_BASE}/serviceDAp"
 PAGE_URL = f"{PORTAL_BASE}/my-eni"
 ROME = ZoneInfo("Europe/Rome")
 # Browser identity: the client presents itself as a current Firefox, coherent with the headers it sends (Firefox
 # has no client hints, Chrome has). It starts from the Firefox of 2026-11-22 and advances one major version every
 # 30 days: Firefox ships one about every four weeks, so the version stays close to the current release without
-# getting ahead of it. (On 2026-11-22 the change from Chrome 131 looked like the fix of the HTTP 401 of the account
-# services; the real cause was the number of open logins, see ``logout``.)
+# getting ahead of it.
 FIREFOX_VERSION = 160
 FIREFOX_VERSION_DATE = date(2026, 11, 22)
 FIREFOX_DAYS_PER_VERSION = 30
@@ -336,6 +336,7 @@ class PlenitudeClient:
         async with self._session.request(
             method, f"{SERVICE_BASE}{path}", params=query, json=body, headers=headers, allow_redirects=False
         ) as resp:
+            self._fix_cookie_paths()
             failed = resp.status >= 300 or (resp.status != 204 and "json" not in resp.headers.get("Content-Type", ""))
             debug = failed and _LOGGER.isEnabledFor(logging.DEBUG)
             _trace(resp, await resp.text(errors="replace") if debug else None)
@@ -352,6 +353,28 @@ class PlenitudeClient:
                     f"{safe_path(path)}: answer is {resp.headers.get('Content-Type')}, not JSON"
                 )
             return await resp.json()
+
+    def _fix_cookie_paths(self) -> None:
+        """Bring the cookies of the portal back to the path ``/``, where the portal sets all of them.
+
+        The portal writes ``Expires`` without the comma after the day (``Expires=Mon   23 Nov 2026 20:20:54
+        GMT``), and the cookie parser of aiohttp before 3.14.5 (the one of Home Assistant 2026.9) then loses the
+        attributes after it, ``Path=/`` included. The session cookies set by ``getJwe`` get the default path
+        ``/serviceDAp/api/c360``: they are sent to ``c360/init`` but not to the other services, which answer
+        HTTP 401 (found on 2026-11-22). With aiohttp 3.14.5 there is nothing to fix. A cookie with the same name
+        already on ``/`` is newer and is kept.
+        """
+        jar = self._session.cookie_jar
+        stray = [c for c in jar if (c["domain"] or "").endswith(PORTAL_HOST) and c["path"] not in ("", "/")]
+        if not stray:
+            return
+        at_root = {(c["domain"], c.key) for c in jar if c["path"] in ("", "/")}
+        keys = {(c["domain"], c["path"], c.key) for c in stray}
+        jar.clear(lambda c: (c["domain"], c["path"], c.key) in keys)
+        for cookie in stray:
+            if (cookie["domain"], cookie.key) not in at_root:
+                jar.update_cookies({cookie.key: cookie.value}, URL(f"https://{cookie['domain']}/"))
+        _LOGGER.debug("Cookies moved to the path /: %s", ", ".join(sorted({c.key for c in stray})))
 
     def has_portal_session(self) -> bool:
         names = {cookie.key for cookie in self._session.cookie_jar}
@@ -426,6 +449,7 @@ class PlenitudeClient:
                 raise PlenitudeSessionExpired(f"getJwe: HTTP {resp.status}")
             resp.raise_for_status()
             await resp.read()
+        self._fix_cookie_paths()
         if not self.has_portal_session():
             raise PlenitudeError("getJwe did not set the portal session cookies")
         return jwt_seconds
@@ -433,9 +457,9 @@ class PlenitudeClient:
     async def logout(self, account: Account | None = None) -> None:
         """Close the sessions as the web app does when the user signs out: Gigya first, then the portal.
 
-        Best effort: errors are only written to the debug log. Without it every login stays open until it
-        expires, and the customer area appears to refuse new sessions when too many are open (2026-11-22).
-        The portal part needs the customer code (``account``).
+        Best effort: errors are only written to the debug log. Without it every login stays open on the account
+        until it expires (30 days for the one of the integration). The portal part needs the customer code
+        (``account``).
         """
         if self.login_token:
             try:

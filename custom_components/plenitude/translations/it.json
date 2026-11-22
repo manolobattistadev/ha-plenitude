@@ -34,7 +34,7 @@
       "no_supplies": "Nell'account non c'è una fornitura luce con l'analisi dei consumi.",
       "supply_missing": "La fornitura configurata non è più in questo account.",
       "unknown": "Errore inatteso: vedi il log di Home Assistant.",
-      "portal_refused": "Plenitude ha accettato il login, ma l'area clienti rifiuta i dati del conto. Succede quando sul conto sono aperte troppe sessioni, per esempio in browser o app da cui non si è usciti: esci da lì, oppure aspetta circa un'ora, poi riprova."
+      "portal_refused": "Plenitude ha accettato il login, ma l'area clienti rifiuta i dati del conto. Controlla che l'area clienti funzioni da un browser, poi riprova più tardi. Se succede ancora, accendi il log di debug (vedi il README) e apri una segnalazione."
     },
     "abort": {
       "already_configured": "Questa fornitura è già configurata.",
@@ -118,7 +118,7 @@
       "message": "Errore nella comunicazione con Plenitude: {error}"
     },
     "portal_refused": {
-      "message": "L'area clienti rifiuta i dati del conto (troppe sessioni aperte sul conto?): nuovo login tra qualche minuto"
+      "message": "L'area clienti rifiuta i dati del conto: nuovo login tra qualche minuto"
     }
   },
   "config_subentries": {

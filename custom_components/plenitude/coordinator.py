@@ -277,9 +277,8 @@ class PlenitudeCoordinator(DataUpdateCoordinator[PlenitudeData]):
     async def _call[T](self, request: Callable[[], Awaitable[T]]) -> T:
         """Run a request; if the session is over, renew it once and try again.
 
-        If the portal still refuses, the login itself is refused: the customer area does so with the logins
-        opened while too many were open on the account, and renewing the portal session does not help. The
-        login is closed, so that the next attempt (after ``LOGIN_PAUSE``) signs in again.
+        If the portal still refuses, a new portal session did not help: the login is closed, so that the next
+        attempt (after ``LOGIN_PAUSE``) signs in again instead of keeping a refused login for 30 days.
         """
         try:
             return await request()

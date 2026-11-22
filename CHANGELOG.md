@@ -4,6 +4,16 @@ All notable changes to this project are listed here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [semantic versioning](https://semver.org/).
 
+## [0.3.5] - 2026-11-23
+
+### Fixed
+- The real cause of *portal refused* (HTTP 401 from the account services) with Home Assistant 2026.9: the portal
+  writes `Expires` without the comma after the day, and aiohttp before 3.14.5 then loses the `Path=/` of the
+  session cookies, which are no longer sent to the services of the account. The client brings the cookies of
+  the portal back to `/`. Checked in the official image of Home Assistant 2026.9.4.
+- The explanations of 0.3.2 (User-Agent) and 0.3.4 (too many open logins) were wrong; the sign-out, the pause
+  between logins and the sign-out on removal of 0.3.4 stay, as good practice. Texts of the error updated.
+
 ## [0.3.4] - 2026-11-22
 
 ### Fixed

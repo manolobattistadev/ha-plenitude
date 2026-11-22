@@ -129,8 +129,9 @@ class PlenitudeConfigFlow(ConfigFlow, domain=DOMAIN):
             _LOGGER.warning("Plenitude %s: login refused by Plenitude: %s", INTEGRATION_VERSION, safe_error(err))
             return [], "invalid_auth"
         except PlenitudeSessionExpired as err:
-            # Login accepted, but the customer area refuses the data of the account: HTTP 401 from every service
-            # of the account when too many logins are open on it (2026-11-22). The login was closed anyway.
+            # Login accepted, but the customer area refuses the data of the account (HTTP 401 from the services of
+            # the account; on 2026-11-22 the cause was the cookie paths, see api._fix_cookie_paths). The login was
+            # closed anyway.
             _LOGGER.warning(
                 "Plenitude %s: login accepted, but the customer area refused the account data: %s",
                 INTEGRATION_VERSION,

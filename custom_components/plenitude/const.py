@@ -6,7 +6,7 @@ import hashlib
 from datetime import timedelta
 
 DOMAIN = "plenitude"
-VERSION = "0.3.4"
+VERSION = "0.3.5"
 
 # Cards (frontend/plenitude-cards.js), served by the integration and loaded by the frontend.
 CARDS_URL = "/plenitude_static"
@@ -16,9 +16,8 @@ CONF_SUPPLY = "supply"  # key of the supply: hash of the POD, never the POD itse
 
 # The Gigya session lasts what the login asks for: 30 days were granted on 2026-11-22.
 SESSION_EXPIRATION = 30 * 24 * 3600
-# Minimum time between two logins with the password. The customer area refuses the data to new logins when
-# too many are open on the account (2026-11-22): retrying at every attempt of Home Assistant would only open
-# more.
+# Minimum time between two logins with the password: when the customer area refuses the data of a new login,
+# Home Assistant retries the setup every 80 seconds, and a login each time would only multiply the sessions.
 LOGIN_PAUSE = timedelta(minutes=15)
 
 # Data arrive about two days late, once a day: a few checks a day are enough.
