@@ -217,7 +217,8 @@ class PlenitudeClient:
         async with self._session.request(
             method, f"{SERVICE_BASE}{path}", params=query, json=body, headers=headers, allow_redirects=False
         ) as resp:
-            if resp.status in (301, 302, 303, 307, 308, 401, 403):
+            # 406 is what the portal answers after about an hour of inactivity (measured 2026-11-22).
+            if resp.status in (301, 302, 303, 307, 308, 401, 403, 406):
                 raise PlenitudeSessionExpired(f"{path}: HTTP {resp.status}")
             if resp.status == 204:
                 return None

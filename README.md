@@ -12,7 +12,8 @@ nella dashboard Energia. Funziona con ogni tipo di installazione di Home Assista
 - [x] Analisi delle API (login Gigya, sessione del portale, consumi quartorari, mensili per fascia)
 - [x] Client asincrono indipendente da Home Assistant: `custom_components/plenitude/api.py`
 - [x] Prototipo provato dal Mac (2026-11-22): login da script senza CAPTCHA, quarti d'ora di un giorno
-- [ ] Misura della durata reale delle sessioni (portale dopo inattività, Gigya a 30 giorni)
+- [x] Portale scaduto dopo meno di 55 minuti di inattività (`406`), rinnovato senza password (2026-11-22)
+- [ ] Tenuta della sessione Gigya di 30 giorni oltre le 24 ore (`prototipo.py stato` nei prossimi giorni)
 - [ ] Integrazione: configurazione guidata, ri-autenticazione, import delle statistiche, HACS
 
 ## Comportamento dei dati (verificato il 2026-11-22)
@@ -61,4 +62,4 @@ quindi non va copiata né messa nel repository. Senza `--valori` lo script non s
 |---|---|---|
 | `id_token` (JWT) | 60 s da `accounts.login`, 300 s da `accounts.getJWT` | si chiede quando serve |
 | Sessione Gigya (`login_token`) | quella chiesta con `sessionExpiration`: 3000 s nella webapp; **30 giorni concessi** quando chiesti dal prototipo (`--durata 2592000`) | con la password; tenuta reale a 30 giorni da misurare |
-| Sessione del portale (`GYSESSION`, `G-GENUI`) | cookie validi 24 h (`Max-Age=86400`); scadenza reale da misurare | senza password finché la sessione Gigya vale |
+| Sessione del portale (`GYSESSION`, `G-GENUI`) | cookie validi 24 h (`Max-Age=86400`), ma il server la chiude prima: dopo **meno di 55 minuti di inattività** risponde `HTTP 406` | **senza password**, con `getJWT` + `getJwe`, finché la sessione Gigya vale (provato il 2026-11-22) |
