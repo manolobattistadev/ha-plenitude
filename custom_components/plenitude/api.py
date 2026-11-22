@@ -21,7 +21,7 @@ import re
 import secrets
 import string
 from dataclasses import dataclass
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import UTC, date, datetime, time, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -153,7 +153,7 @@ def safe_path(path: str) -> str:
 
 
 def _utc_iso(moment: datetime) -> str:
-    return moment.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    return moment.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S.000Z")
 
 
 def day_period(day: date) -> dict[str, str]:
@@ -198,8 +198,8 @@ def _sequence(items: list[dict[str, Any]] | None, day: date, step: timedelta) ->
     Returns the readings and whether the server timestamps matched the rebuilt ones.
     """
     items = items or []
-    start = datetime.combine(day, time.min, ROME).astimezone(timezone.utc)
-    end = datetime.combine(day + timedelta(days=1), time.min, ROME).astimezone(timezone.utc)
+    start = datetime.combine(day, time.min, ROME).astimezone(UTC)
+    end = datetime.combine(day + timedelta(days=1), time.min, ROME).astimezone(UTC)
     if not items or len(items) != (end - start) // step:
         return [], not items
     readings, server_ok = [], True
@@ -326,7 +326,7 @@ class PlenitudeClient:
             raise PlenitudeError("accounts.login: no login_token in the answer")
         expires_in = int(info.get("expires_in", 0))
         self.login_token = info["login_token"]
-        self.login_token_expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
+        self.login_token_expires_at = datetime.now(UTC) + timedelta(seconds=expires_in)
         jwt_seconds = await self.open_portal_session()
         return {"gigya_session": expires_in, "requested_gigya_session": session_expiration, "jwt": jwt_seconds}
 

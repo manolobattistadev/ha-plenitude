@@ -40,12 +40,20 @@
 <body>
 <section class="theme light" id="light"><h1>Tema chiaro</h1></section>
 <section class="theme dark" id="dark"><h1>Tema scuro</h1></section>
+<section class="theme light" id="english"><h1>English (user profile language)</h1></section>
 <script>
   // ----- synthetic data: deterministic hourly profile, bands as in the ARERA table (no holidays here)
   const FIRST = new Date(2026, 0, 4).getTime();
   const LAST_DAY = "2026-11-20";
   const LAST = new Date(2026, 10, 21).getTime();
   const PRICES = { f1: 0.31, f2: 0.27, f3: 0.22 };
+  const COSTS = [
+    { name: "Quota fissa", kind: "monthly", amount: 8.5 },
+    { name: "Quota potenza", kind: "bimonthly", amount: 7.2 },
+    { name: "Canone RAI", kind: "yearly", amount: 90 },
+    { name: "Oneri di sistema", kind: "per_kwh", amount: 0.035 },
+  ];
+  const EXTRA = 0.035; // sum of the costs per kWh, as in the cost statistic
   const CATS = ["comfort_ambientale", "standby", "lavare", "elettronica_luci", "refrigerare", "cucinare", "ricarica_elettrica", "altro"];
   const NAMES = ["Comfort Ambientale (HVAC)", "Standby", "Lavare", "Elettronica e luci", "Refrigerare", "Cucinare", "Ricarica elettrica", "Altro"];
   const SHARES = [0.22, 0.12, 0.1, 0.16, 0.14, 0.1, 0.06, 0.1];
@@ -68,7 +76,7 @@
     const key = id.slice(P.length + 1);
     const v = kwh(t);
     if (key === "consumo") return v;
-    if (key === "costo") return v * PRICES[band(t)];
+    if (key === "costo") return v * (PRICES[band(t)] + EXTRA);
     if (key === "f1" || key === "f2" || key === "f3") return band(t) === key ? v : 0;
     return null;
   }
@@ -97,13 +105,14 @@
     }
     return out;
   }
-  function makeHass(dark) {
+  function makeHass(dark, lang = "it") {
     return {
-      language: "it", locale: { language: "it" }, themes: { darkMode: dark }, connection: {},
+      language: lang, locale: { language: lang }, themes: { darkMode: dark }, connection: {},
       async callWS(msg) {
         if (msg.type === "plenitude/info") {
           return { entries: [{
-            entry_id: "demo", title: "Plenitude luce", last_day: LAST_DAY, price_mode: "three", prices: PRICES, currency: "EUR",
+            entry_id: "demo", title: "Plenitude luce", first_day: "2026-01-04", last_day: LAST_DAY, price_mode: "three", prices: PRICES,
+            costs: COSTS, currency: "EUR",
             statistics: { consumo: P + "_consumo", f1: P + "_f1", f2: P + "_f2", f3: P + "_f3", costo: P + "_costo" },
             categories: CATS.map((c, i) => ({ key: c, name: NAMES[i], statistic_id: P + "_cat_" + c })),
           }] };
@@ -121,8 +130,17 @@
     { type: "plenitude-consumption-card", period: "week", view: "bands", unit: "eur" },
     { type: "plenitude-billing-card", start_date: "2026-01-15", months: "2", title: "Bimestre dal 15" },
   ];
-  for (const [section, dark, list] of [["light", false, configs], ["dark", true, configs.slice(0, 2)]]) {
-    const hass = makeHass(dark);
+  const english = [
+    { type: "plenitude-consumption-card", period: "week", view: "total", unit: "eur" },
+    { type: "plenitude-consumption-card", period: "month", view: "categories" },
+    { type: "plenitude-billing-card", start_date: "2026-11-01", months: "2" },
+  ];
+  for (const [section, dark, lang, list] of [
+    ["light", false, "it", configs],
+    ["dark", true, "it", configs.slice(0, 2)],
+    ["english", false, "en", english],
+  ]) {
+    const hass = makeHass(dark, lang);
     for (const config of list) {
       const card = document.createElement(config.type);
       card.setConfig(config);

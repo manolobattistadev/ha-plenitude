@@ -7,6 +7,10 @@
         "data": {
           "email": "Email",
           "password": "Password"
+        },
+        "data_description": {
+          "email": "Email of your Eni Plenitude customer account.",
+          "password": "Stored in Home Assistant and sent only to the Plenitude login service."
         }
       },
       "supply": {
@@ -40,20 +44,27 @@
     "step": {
       "init": {
         "title": "Energy price",
-        "description": "Plenitude does not expose the price of the offer: enter it to get the cost too. If you change it, the cost of the whole history is recomputed with the new price.",
+        "description": "Plenitude does not expose the price of the offer: enter it to get the cost too. If you change it, the cost of the whole history is recomputed. Other costs (fixed fees, TV licence, charges per kWh) are added with **Add cost** in the integration page.",
         "data": {
           "price_mode": "Price type"
         }
       },
       "prices": {
         "title": "Prices per kWh",
-        "description": "Prices in euro per kWh. For a cost close to the real one use an all-inclusive price (total of a bill divided by the billed kWh); the energy price of the offer alone gives a lower cost.",
+        "description": "Prices of the energy in euro per kWh, as in your offer. Charges per kWh that are not in these prices (transport, system charges, excise duty) can be added as costs per kWh.",
         "data": {
           "price": "Single price",
           "price_f1": "Band F1",
           "price_f2": "Band F2",
           "price_f3": "Band F3",
           "price_f23": "Band F23 (F2 + F3)"
+        },
+        "data_description": {
+          "price": "Euro per kWh, the same in every hour.",
+          "price_f1": "Euro per kWh, Monday to Friday 8:00-19:00.",
+          "price_f2": "Euro per kWh, Monday to Friday 7:00-8:00 and 19:00-23:00, Saturday 7:00-23:00.",
+          "price_f3": "Euro per kWh, nights 23:00-7:00, Sundays and holidays.",
+          "price_f23": "Euro per kWh in every hour outside F1."
         }
       }
     }
@@ -66,6 +77,14 @@
         "two": "Two bands: F1 and F23",
         "three": "Three bands: F1, F2, F3"
       }
+    },
+    "kind": {
+      "options": {
+        "monthly": "Monthly",
+        "bimonthly": "Every two months",
+        "yearly": "Yearly",
+        "per_kwh": "Per kWh"
+      }
     }
   },
   "entity": {
@@ -77,7 +96,69 @@
         "name": "Consumption of the last day"
       },
       "costo_ultimo_giorno": {
-        "name": "Cost of the last day"
+        "name": "Consumption cost of the last day"
+      }
+    }
+  },
+  "exceptions": {
+    "login_refused": {
+      "message": "Plenitude refused the login ({error}): sign in again."
+    },
+    "login_failed": {
+      "message": "Plenitude login failed ({error}): retrying later."
+    },
+    "analysis_unavailable": {
+      "message": "The consumption analysis is not available for the configured supply."
+    },
+    "supply_missing": {
+      "message": "The configured supply is no longer in the Plenitude account."
+    },
+    "communication_error": {
+      "message": "Error communicating with Plenitude: {error}"
+    }
+  },
+  "config_subentries": {
+    "cost": {
+      "entry_type": "Cost",
+      "initiate_flow": {
+        "user": "Add cost",
+        "reconfigure": "Edit cost"
+      },
+      "step": {
+        "user": {
+          "title": "Add a cost",
+          "description": "A cost of your contract besides the price of the energy. Monthly, two-monthly and yearly costs are spread over the days in the cards; costs per kWh are added to the price of every hour, also in the Energy dashboard.",
+          "data": {
+            "name": "Name",
+            "kind": "Type",
+            "amount": "Amount"
+          },
+          "data_description": {
+            "name": "Any text, for example: TV licence, fixed fee, power, system charges.",
+            "kind": "How the amount is charged: every month, every two months, every year, or for each kWh consumed.",
+            "amount": "Euro, at most 6 decimals (euro per kWh for the costs per kWh). Use a negative amount for a discount."
+          }
+        },
+        "reconfigure": {
+          "title": "Edit the cost",
+          "data": {
+            "name": "Name",
+            "kind": "Type",
+            "amount": "Amount"
+          },
+          "data_description": {
+            "name": "Any text, for example: TV licence, fixed fee, power, system charges.",
+            "kind": "How the amount is charged: every month, every two months, every year, or for each kWh consumed.",
+            "amount": "Euro, at most 6 decimals (euro per kWh for the costs per kWh). Use a negative amount for a discount."
+          }
+        }
+      },
+      "error": {
+        "empty_name": "Enter a name.",
+        "too_many_decimals": "At most 6 decimals."
+      },
+      "abort": {
+        "reconfigure_successful": "Cost updated."
       }
     }
   }

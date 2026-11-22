@@ -7,6 +7,10 @@
         "data": {
           "email": "Email",
           "password": "Password"
+        },
+        "data_description": {
+          "email": "Email del tuo account dell'area clienti Eni Plenitude.",
+          "password": "Resta in Home Assistant e viene inviata solo al servizio di login di Plenitude."
         }
       },
       "supply": {
@@ -40,20 +44,27 @@
     "step": {
       "init": {
         "title": "Prezzo dell'energia",
-        "description": "Plenitude non espone il prezzo dell'offerta: indicalo tu per avere anche il costo. Se lo cambi, il costo di tutto lo storico viene ricalcolato con il nuovo prezzo.",
+        "description": "Plenitude non espone il prezzo dell'offerta: indicalo tu per avere anche il costo. Se lo cambi, il costo di tutto lo storico viene ricalcolato. Gli altri costi (quote fisse, canone RAI, oneri per kWh) si aggiungono con **Aggiungi costo** nella pagina dell'integrazione.",
         "data": {
           "price_mode": "Tipo di prezzo"
         }
       },
       "prices": {
         "title": "Prezzi per kWh",
-        "description": "Prezzi in euro per kWh. Per un costo vicino a quello reale usa un prezzo tutto compreso (totale di una bolletta diviso i kWh fatturati); il solo prezzo dell'energia dell'offerta dà un costo più basso.",
+        "description": "Prezzi dell'energia in euro per kWh, come nella tua offerta. Gli oneri per kWh che non sono in questi prezzi (trasporto, oneri di sistema, accise) si possono aggiungere come costi per kWh.",
         "data": {
           "price": "Prezzo unico",
           "price_f1": "Fascia F1",
           "price_f2": "Fascia F2",
           "price_f3": "Fascia F3",
           "price_f23": "Fascia F23 (F2 + F3)"
+        },
+        "data_description": {
+          "price": "Euro per kWh, uguale in tutte le ore.",
+          "price_f1": "Euro per kWh, dal lunedì al venerdì 8-19.",
+          "price_f2": "Euro per kWh, dal lunedì al venerdì 7-8 e 19-23, il sabato 7-23.",
+          "price_f3": "Euro per kWh, notti 23-7, domeniche e festivi.",
+          "price_f23": "Euro per kWh in tutte le ore fuori dalla F1."
         }
       }
     }
@@ -66,6 +77,14 @@
         "two": "Due fasce: F1 e F23 (bioraria)",
         "three": "Tre fasce: F1, F2, F3 (multioraria)"
       }
+    },
+    "kind": {
+      "options": {
+        "monthly": "Mensile",
+        "bimonthly": "Bimestrale",
+        "yearly": "Annuale",
+        "per_kwh": "Per kWh"
+      }
     }
   },
   "entity": {
@@ -77,7 +96,69 @@
         "name": "Consumo dell'ultimo giorno"
       },
       "costo_ultimo_giorno": {
-        "name": "Costo dell'ultimo giorno"
+        "name": "Costo dei consumi dell'ultimo giorno"
+      }
+    }
+  },
+  "exceptions": {
+    "login_refused": {
+      "message": "Plenitude ha rifiutato il login ({error}): accedi di nuovo."
+    },
+    "login_failed": {
+      "message": "Login a Plenitude non riuscito ({error}): nuovo tentativo più tardi."
+    },
+    "analysis_unavailable": {
+      "message": "L'analisi dei consumi non è disponibile per la fornitura configurata."
+    },
+    "supply_missing": {
+      "message": "La fornitura configurata non è più nell'account Plenitude."
+    },
+    "communication_error": {
+      "message": "Errore nella comunicazione con Plenitude: {error}"
+    }
+  },
+  "config_subentries": {
+    "cost": {
+      "entry_type": "Costo",
+      "initiate_flow": {
+        "user": "Aggiungi costo",
+        "reconfigure": "Modifica costo"
+      },
+      "step": {
+        "user": {
+          "title": "Aggiungi un costo",
+          "description": "Un costo del tuo contratto oltre al prezzo dell'energia. I costi mensili, bimestrali e annuali sono ripartiti sui giorni nelle card; i costi per kWh si aggiungono al prezzo di ogni ora, anche nella dashboard Energia.",
+          "data": {
+            "name": "Nome",
+            "kind": "Tipologia",
+            "amount": "Importo"
+          },
+          "data_description": {
+            "name": "Un testo libero, per esempio: canone RAI, quota fissa, quota potenza, oneri di sistema.",
+            "kind": "Come si paga l'importo: ogni mese, ogni due mesi, ogni anno o per ogni kWh consumato.",
+            "amount": "Euro, al massimo 6 decimali (euro per kWh per i costi per kWh). Per uno sconto usa un importo negativo."
+          }
+        },
+        "reconfigure": {
+          "title": "Modifica il costo",
+          "data": {
+            "name": "Nome",
+            "kind": "Tipologia",
+            "amount": "Importo"
+          },
+          "data_description": {
+            "name": "Un testo libero, per esempio: canone RAI, quota fissa, quota potenza, oneri di sistema.",
+            "kind": "Come si paga l'importo: ogni mese, ogni due mesi, ogni anno o per ogni kWh consumato.",
+            "amount": "Euro, al massimo 6 decimali (euro per kWh per i costi per kWh). Per uno sconto usa un importo negativo."
+          }
+        }
+      },
+      "error": {
+        "empty_name": "Inserisci un nome.",
+        "too_many_decimals": "Al massimo 6 decimali."
+      },
+      "abort": {
+        "reconfigure_successful": "Costo aggiornato."
       }
     }
   }

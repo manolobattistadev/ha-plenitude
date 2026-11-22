@@ -6,13 +6,18 @@
  *   custom:plenitude-billing-card      current billing period (two months from a chosen day): kWh and cost
  *                                      so far, bands, estimate at the end of the period
  *
+ * Costs: the cost statistic is kWh x (price of the band + costs per kWh). The monthly, two-monthly and yearly
+ * costs entered in the integration are spread by the cards over the days (amount x times a year / days of the
+ * year), from the first to the last day with data.
+ * Texts in Italian and English, following the language of the user's profile.
+ *
  * Served by the integration (custom_components/plenitude) and loaded by the frontend on every dashboard.
  * Values come from the long-term statistics (recorder/statistics_during_period); the integration's
  * plenitude/info command only says which statistics exist. No external dependencies: plain custom elements
  * and hand-drawn SVG. Text that comes from outside (category names) is always set with textContent.
  */
 
-const CARD_VERSION = "0.2.0";
+const CARD_VERSION = "0.3.0";
 
 // ------------------------------------------------------------------------------------------- language
 
@@ -64,10 +69,27 @@ const STRINGS = {
     estimate_note: "media dei giorni con dati × durata del periodo",
     choose_start: "Scegli nelle impostazioni della card il primo giorno di un periodo di fatturazione.",
     cost_note:
-      "Il costo è kWh × prezzo impostato nell'integrazione: con un prezzo «tutto compreso» si avvicina alla bolletta, con il solo prezzo dell'energia è più basso.",
+      "Il costo è kWh × (prezzo della fascia + costi per kWh), più i costi mensili, bimestrali e annuali ripartiti per giorno, come impostati nell'integrazione. È una stima: la bolletta può contenere anche conguagli e letture stimate.",
     future: "periodo futuro",
     period_total: "Totale del periodo",
     when: "Quando",
+    fixed_costs: "Costi fissi",
+    usage_cost: "Consumi",
+    energy_cost: "Energia",
+    with_fixed: "di cui costi fissi {x}",
+    cost_breakdown: "Composizione del costo",
+    kind_monthly: "mensile",
+    kind_bimonthly: "bimestrale",
+    kind_yearly: "annuale",
+    kind_per_kwh: "per kWh",
+    cat_comfort_ambientale: "Comfort ambientale (HVAC)",
+    cat_standby: "Standby",
+    cat_lavare: "Lavare",
+    cat_elettronica_luci: "Elettronica e luci",
+    cat_refrigerare: "Refrigerare",
+    cat_cucinare: "Cucinare",
+    cat_ricarica_elettrica: "Ricarica elettrica",
+    cat_altro: "Altro",
   },
   en: {
     consumption_card: "Plenitude: consumption",
@@ -116,10 +138,27 @@ const STRINGS = {
     estimate_note: "average of the days with data × length of the period",
     choose_start: "Choose the first day of a billing period in the card settings.",
     cost_note:
-      "The cost is kWh × the price set in the integration: an all-inclusive price gets close to the bill, the energy price alone gives a lower cost.",
+      "The cost is kWh × (price of the band + costs per kWh), plus the monthly, two-monthly and yearly costs spread over the days, as set in the integration. It is an estimate: the bill may also contain adjustments and estimated readings.",
     future: "future period",
     period_total: "Period total",
     when: "When",
+    fixed_costs: "Fixed costs",
+    usage_cost: "Consumption",
+    energy_cost: "Energy",
+    with_fixed: "of which fixed costs {x}",
+    cost_breakdown: "Cost breakdown",
+    kind_monthly: "monthly",
+    kind_bimonthly: "every two months",
+    kind_yearly: "yearly",
+    kind_per_kwh: "per kWh",
+    cat_comfort_ambientale: "Heating and cooling (HVAC)",
+    cat_standby: "Standby",
+    cat_lavare: "Washing",
+    cat_elettronica_luci: "Electronics and lighting",
+    cat_refrigerare: "Refrigeration",
+    cat_cucinare: "Cooking",
+    cat_ricarica_elettrica: "EV charging",
+    cat_altro: "Other",
   },
 };
 
@@ -127,15 +166,22 @@ const pageLang = () => ((document.documentElement.lang || navigator.language || 
 const hassLang = (hass) => (((hass && (hass.locale?.language || hass.language)) || pageLang()).startsWith("it") ? "it" : "en");
 const tr = (lang, key, vars = {}) =>
   (STRINGS[lang][key] ?? STRINGS.en[key] ?? key).replace(/\{(\w+)\}/g, (_, name) => String(vars[name] ?? ""));
+/** In Italian the portal's own name of a category; in English ours, by key (the portal speaks Italian only). */
+function categoryName(lang, category) {
+  const ours = STRINGS[lang][`cat_${category.key}`];
+  return (lang === "it" ? category.name || ours : ours || category.name) || category.key;
+}
 
 // --------------------------------------------------------------------------------------------- colors
 
 // Categorical palette validated for CVD separation (adjacent pairs; the first three on all pairs) on the
 // Home Assistant card surfaces, light #ffffff and dark #1c1c1c. Slots are assigned in fixed order.
+// Slot 8 is a neutral gray for the fixed costs: not an entity hue, always labelled (3.4:1 and 5.3:1 contrast).
 const PALETTE = {
-  light: ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#6250d6", "#e34948"],
-  dark: ["#3987e5", "#d95926", "#199e70", "#c98500", "#d55181", "#0ca30c", "#9085e9", "#e66767"],
+  light: ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#6250d6", "#e34948", "#8a8a8a"],
+  dark: ["#3987e5", "#d95926", "#199e70", "#c98500", "#d55181", "#0ca30c", "#9085e9", "#e66767", "#8f8f8f"],
 };
+const FIXED_COLOR = 8;
 
 // ---------------------------------------------------------------------------------------------- dates
 
@@ -154,6 +200,37 @@ const addMonths = (date, n, dayOfMonth = date.getDate()) => {
 const startOfWeek = (date) => addDays(date, -((date.getDay() + 6) % 7)); // weeks start on Monday
 const startOfDay = (date) => new Date(date.getFullYear(), date.getMonth(), date.getDate());
 const daysBetween = (a, b) => Math.round((startOfDay(b) - startOfDay(a)) / 86400000);
+const daysInYear = (y) => (new Date(y, 1, 29).getMonth() === 1 ? 366 : 365);
+
+const PERIODS_PER_YEAR = { monthly: 12, bimonthly: 6, yearly: 1 };
+const periodicCosts = (entry) => (entry.costs || []).filter((c) => PERIODS_PER_YEAR[c.kind]);
+const perKwhCosts = (entry) => (entry.costs || []).filter((c) => c.kind === "per_kwh");
+const perKwhExtra = (entry) => perKwhCosts(entry).reduce((a, c) => a + Number(c.amount), 0);
+
+/**
+ * Share of the periodic costs (all of them, or ``items``) in each bucket: ``amount x times a year / days of the
+ * year`` per day, for the days from the first day of the history to ``until`` (by default the last day with
+ * data), split by the hours of the bucket on the day view (23, 24 or 25 per day). ``null`` where nothing
+ * applies, like the statistics.
+ */
+function fixedShares(entry, buckets, until = entry.last_day ? parseDay(entry.last_day) : null, items = periodicCosts(entry)) {
+  const yearly = items.reduce((a, c) => a + Number(c.amount) * (PERIODS_PER_YEAR[c.kind] || 0), 0);
+  if (!yearly || !entry.prices || !until) return buckets.map(() => null);
+  const first = entry.first_day ? parseDay(entry.first_day).getTime() : -Infinity;
+  const stop = addDays(until, 1).getTime();
+  return buckets.map((bucket) => {
+    let total = null;
+    for (let day = startOfDay(new Date(bucket.start)); day.getTime() < bucket.end; day = addDays(day, 1)) {
+      const dayStart = day.getTime();
+      const dayEnd = addDays(day, 1).getTime();
+      if (dayStart < first || dayStart >= stop) continue;
+      const overlap = Math.min(bucket.end, dayEnd) - Math.max(bucket.start, dayStart);
+      if (overlap > 0) total = (total || 0) + (yearly / daysInYear(day.getFullYear())) * (overlap / (dayEnd - dayStart));
+    }
+    return total;
+  });
+}
+const sumValues = (values) => (values || []).reduce((a, v) => a + (v || 0), 0);
 
 /** Range of a period around ``anchor``: start, end (exclusive), statistics period and buckets. */
 function periodRange(period, anchor) {
@@ -270,10 +347,11 @@ function buildSeries(entry, view, unit, lang) {
   const s = entry.statistics;
   const price = entry.prices || {};
   if (view === "categories") {
-    return entry.categories.map((c, i) => ({ key: c.key, name: c.name, color: i, parts: [{ id: c.statistic_id, factor: 1 }] }));
+    return entry.categories.map((c, i) => ({ key: c.key, name: categoryName(lang, c), color: i, parts: [{ id: c.statistic_id, factor: 1 }] }));
   }
   if (view === "bands") {
-    const factor = (band) => (unit === "eur" ? price[band] ?? 0 : 1);
+    const extra = unit === "eur" ? perKwhExtra(entry) : 0;
+    const factor = (band) => (unit === "eur" ? (price[band] ?? 0) + extra : 1);
     if (entry.price_mode === "two") {
       return [
         { key: "f1", name: "F1", color: 0, parts: [{ id: s.f1, factor: factor("f1") }] },
@@ -493,6 +571,11 @@ const STYLE = `
   .meter div { height: 100%; background: var(--primary-color); border-radius: 4px; }
   .segbar { display: flex; gap: 2px; height: 8px; margin: 10px 0 6px; }
   .segbar div { height: 100%; border-radius: 4px; }
+  .breakdown { margin: 6px 0 8px; font-size: 0.85rem; }
+  .breakdown summary { cursor: pointer; color: var(--secondary-text-color); margin-bottom: 4px; }
+  .breakdown .kind { color: var(--secondary-text-color); }
+  .breakdown tfoot th { color: var(--primary-text-color); font-weight: 600; text-align: right; }
+  .breakdown tfoot th:first-child { text-align: left; }
   .footer { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
 `;
 
@@ -648,7 +731,15 @@ class PlenitudeConsumptionCard extends PlenitudeBase {
     // The other unit for the summary line (kWh <-> EUR), when it exists.
     const totalIds = [entry.statistics.consumo, entry.statistics.costo].filter(Boolean);
     const changes = await fetchChanges(this._hass, [...new Set([...ids, ...totalIds])], range);
-    return { range, series: seriesValues(series, changes, range.buckets.length), changes, view, unit, categoriesBlocked };
+    const values = seriesValues(series, changes, range.buckets.length);
+    // Fixed costs: in the totals always, in the chart as the bottom segment of the columns in euro.
+    const fixed = fixedShares(entry, range.buckets);
+    const fixedTotal = sumValues(fixed);
+    if (unit === "eur" && fixedTotal > 0 && !categoriesBlocked) {
+      if (view === "total") values[0].name = tr(this._lang, "usage_cost");
+      values.unshift({ key: "fixed", name: tr(this._lang, "fixed_costs"), color: FIXED_COLOR, parts: [], values: fixed, total: fixedTotal });
+    }
+    return { range, series: values, changes, view, unit, categoriesBlocked, fixedTotal };
   }
 
   _go(direction) {
@@ -686,7 +777,8 @@ class PlenitudeConsumptionCard extends PlenitudeBase {
     const sumOf = (id) => (id ? (changes[id] || []).reduce((a, v) => a + (v || 0), 0) : null);
     const hasAny = (id) => id && (changes[id] || []).some((v) => v !== null);
     const kwhTotal = sumOf(entry.statistics.consumo);
-    const eurTotal = entry.statistics.costo ? sumOf(entry.statistics.costo) : null;
+    const fixedTotal = this._data.fixedTotal || 0;
+    const eurTotal = entry.statistics.costo ? sumOf(entry.statistics.costo) + fixedTotal : null;
 
     const periodButtons = el(
       "div",
@@ -740,6 +832,9 @@ class PlenitudeConsumptionCard extends PlenitudeBase {
       el("span", { class: "big", text: hasAny(entry.statistics.consumo) ? (unit === "eur" && eurTotal !== null ? f.eur(eurTotal) : f.kwh(kwhTotal)) : tr(lang, "no_data") }),
       hasAny(entry.statistics.consumo) && eurTotal !== null
         ? el("span", { class: "second", text: unit === "eur" ? f.kwh(kwhTotal) : f.eur(eurTotal) })
+        : null,
+      hasAny(entry.statistics.consumo) && eurTotal !== null && fixedTotal > 0
+        ? el("span", { class: "second", text: tr(lang, "with_fixed", { x: f.eur(fixedTotal) }) })
         : null,
     ]);
 
@@ -933,9 +1028,19 @@ class PlenitudeBillingCard extends PlenitudeBase {
     const { period, range, changes, isCurrent } = this._data;
     const s = entry.statistics;
     const kwhDaily = changes[s.consumo];
-    const sum = (values) => (values || []).reduce((a, v) => a + (v || 0), 0);
+    const sum = sumValues;
     const kwh = sum(kwhDaily);
-    const eur = s.costo ? sum(changes[s.costo]) : null;
+    // Cost of the consumption (energy + costs per kWh, the cost statistic) and periodic costs so far (up to the
+    // last day with data) and for the whole period, for the estimate.
+    const usageEur = s.costo ? sum(changes[s.costo]) : null;
+    const fixedDaily = fixedShares(entry, range.buckets);
+    const fixedSoFar = sum(fixedDaily);
+    const fixedPeriod = sum(fixedShares(entry, range.buckets, addDays(period.end, -1)));
+    const eur = usageEur !== null ? usageEur + fixedSoFar : null;
+    const costOfDay = (i) => {
+      const energy = s.costo ? changes[s.costo][i] : null;
+      return energy === null && fixedDaily[i] === null ? null : (energy || 0) + (fixedDaily[i] || 0);
+    };
     const periodDays = range.buckets.length;
     const dataDays = kwhDaily.filter((v) => v !== null).length;
     const lastDay = entry.last_day ? parseDay(entry.last_day) : null;
@@ -951,7 +1056,10 @@ class PlenitudeBillingCard extends PlenitudeBase {
     const tiles = el("div", { class: "tiles" }, [
       el("div", { class: "tile" }, [el("div", { class: "label", text: `${tr(lang, "consumption")}${isCurrent ? ` ${tr(lang, "so_far")}` : ""}` }), el("div", { class: "value", text: dataDays ? f.kwh(kwh) : "–" })]),
       eur !== null
-        ? el("div", { class: "tile" }, [el("div", { class: "label", text: `${tr(lang, "cost")}${isCurrent ? ` ${tr(lang, "so_far")}` : ""}` }), el("div", { class: "value", text: dataDays ? f.eur(eur) : "–" })])
+        ? el("div", { class: "tile" }, [
+            el("div", { class: "label", text: `${tr(lang, "cost")}${isCurrent ? ` ${tr(lang, "so_far")}` : ""}` }),
+            el("div", { class: "value", text: dataDays ? f.eur(eur) : "–" }),
+          ])
         : null,
     ]);
 
@@ -970,7 +1078,7 @@ class PlenitudeBillingCard extends PlenitudeBase {
       children.push(meter);
       if (dataDays >= 3 && reached < periodDays) {
         const projectedKwh = (kwh / dataDays) * periodDays;
-        const projectedEur = eur !== null ? (eur / dataDays) * periodDays : null;
+        const projectedEur = usageEur !== null ? (usageEur / dataDays) * periodDays + fixedPeriod : null;
         children.push(
           el("p", { class: "note" }, [
             `${tr(lang, "estimate")}: `,
@@ -1003,6 +1111,23 @@ class PlenitudeBillingCard extends PlenitudeBase {
         ),
       );
     }
+    // Cost breakdown, item by item, when there are costs besides the energy.
+    if (eur !== null && dataDays && (entry.costs || []).length) {
+      const rows = [[tr(lang, "energy_cost"), null, usageEur - kwh * perKwhExtra(entry)]];
+      for (const c of perKwhCosts(entry)) rows.push([c.name, c.kind, kwh * Number(c.amount)]);
+      for (const c of periodicCosts(entry)) rows.push([c.name, c.kind, sum(fixedShares(entry, range.buckets, undefined, [c]))]);
+      const line = ([name, kind, value]) =>
+        el("tr", {}, [el("td", {}, [name, kind ? el("span", { class: "kind", text: ` · ${tr(lang, `kind_${kind}`)}` }) : null]), el("td", { text: f.eur(value) })]);
+      children.push(
+        el("details", { class: "breakdown", open: true }, [
+          el("summary", { text: tr(lang, "cost_breakdown") }),
+          el("table", {}, [
+            el("tbody", {}, rows.map(line)),
+            el("tfoot", {}, [el("tr", {}, [el("th", { text: tr(lang, "total") }), el("th", { text: f.eur(eur) })])]),
+          ]),
+        ]),
+      );
+    }
 
     // Daily columns of the period, by band.
     const chartBox = el("div", { class: `chart${this._loading ? " loading" : ""}` });
@@ -1014,7 +1139,7 @@ class PlenitudeBillingCard extends PlenitudeBase {
           el("td", { text: when(i) }),
           ...bandValues.map((b) => el("td", { text: b.values[i] === null ? "–" : f.kwh(b.values[i]) })),
           el("td", { text: kwhDaily[i] === null ? "–" : f.kwh(kwhDaily[i]) }),
-          s.costo ? el("td", { text: changes[s.costo][i] === null ? "–" : f.eur(changes[s.costo][i]) }) : null,
+          s.costo ? el("td", { text: costOfDay(i) === null ? "–" : f.eur(costOfDay(i)) }) : null,
         ]),
       );
       chartBox.append(el("div", { class: "tablewrap" }, [el("table", {}, [el("thead", {}, [head]), el("tbody", {}, rows)])]));
@@ -1042,7 +1167,7 @@ class PlenitudeBillingCard extends PlenitudeBase {
                 if (b.values[index] === null) continue;
                 rows.push(el("div", { class: "row" }, [el("span", { class: "line", style: `background:${this._colors[b.color]}` }), el("b", { text: f.kwh(b.values[index]) }), b.name]));
               }
-              rows.push(el("div", { class: "row sum" }, [el("b", { text: f.kwh(kwhDaily[index]) }), s.costo && changes[s.costo][index] !== null ? `· ${f.eur(changes[s.costo][index])}` : tr(lang, "total")]));
+              rows.push(el("div", { class: "row sum" }, [el("b", { text: f.kwh(kwhDaily[index]) }), s.costo && costOfDay(index) !== null ? `· ${f.eur(costOfDay(index))}` : tr(lang, "total")]));
               return rows;
             }),
           onLeave: () => this._hideTooltip(chartBox),

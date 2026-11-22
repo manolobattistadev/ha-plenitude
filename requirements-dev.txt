@@ -1,2 +1,2 @@
-# Dipendenze del prototipo da riga di comando (l'integrazione userà aiohttp di Home Assistant)
+# Command-line prototype (scripts/prototipo.py); the integration uses Home Assistant's aiohttp
 aiohttp>=3.12

@@ -4,7 +4,8 @@ Statistics (``{prefix}`` is ``plenitude:luce_<key of the supply>``), all with a 
 
 - ``{prefix}_consumo``: measured kWh per hour;
 - ``{prefix}_f1``, ``_f2``, ``_f3``: the same hours split by ARERA band (0 in the hours of other bands);
-- ``{prefix}_costo``: EUR per hour, kWh x price of the band, only if a price is configured;
+- ``{prefix}_costo``: EUR per hour, kWh x (price of the band + costs per kWh), when a price or an additional cost
+  is configured (monthly, two-monthly and yearly costs are not in it: the cards spread them over the days);
 - ``{prefix}_cat_<category>``: estimated kWh per day (one value at local midnight), as the portal gives them.
 
 Data arrive about two days late, so they are imported with their own timestamps instead of being sensor states.
@@ -16,7 +17,7 @@ import asyncio
 import logging
 from collections.abc import Awaitable, Callable, Iterator
 from dataclasses import dataclass
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import UTC, date, datetime, time, timedelta
 from typing import Any
 
 import aiohttp
@@ -49,7 +50,7 @@ from .api import (
     PlenitudeSessionExpired,
     Supply,
 )
-from .bands import BANDS, PRICE_MODE, PRICE_NONE, band, price_of, price_signature
+from .bands import BANDS, band
 from .const import (
     CATEGORY_PREFIX,
     CONF_SUPPLY,
@@ -66,23 +67,19 @@ from .const import (
     statistic_prefix,
     supply_key,
 )
+from .costs import COST_SUBENTRY, CostItem, cost_signature, has_cost, hour_price
+from .texts import CATEGORY_NAMES, ENGLISH, ITALIAN, language, text
 
 _LOGGER = logging.getLogger(__name__)
 
 CURRENCY = "EUR"
-# Labels used until the portal has sent its own (they are the same on 2026-11-22).
-DEFAULT_CATEGORY_NAMES = {
-    "refrigerare": "Refrigerare",
-    "standby": "Standby",
-    "lavare": "Lavare",
-    "cucinare": "Cucinare",
-    "comfort_ambientale": "Comfort ambientale (HVAC)",
-    "elettronica_luci": "Elettronica e luci",
-    "altro": "Altro",
-    "ricarica_elettrica": "Ricarica elettrica",
-}
 
 type PlenitudeConfigEntry = ConfigEntry[PlenitudeCoordinator]
+
+
+def cost_items(entry: ConfigEntry) -> list[CostItem]:
+    """Additional costs of an entry, in the order they were added."""
+    return [CostItem.from_data(sub.data) for sub in entry.subentries.values() if sub.subentry_type == COST_SUBENTRY]
 
 
 @dataclass
@@ -102,7 +99,7 @@ def _days(first: date, last: date) -> Iterator[date]:
 
 
 def _midnight_utc(day: date) -> datetime:
-    return datetime.combine(day, time.min, ROME).astimezone(timezone.utc)
+    return datetime.combine(day, time.min, ROME).astimezone(UTC)
 
 
 def _local_day(moment: datetime) -> date:
@@ -119,14 +116,13 @@ class PlenitudeCoordinator(DataUpdateCoordinator[PlenitudeData]):
         # A session of its own: the portal session lives in its cookies.
         self.client = PlenitudeClient(async_create_clientsession(hass, cookie_jar=aiohttp.CookieJar()))
         # Tokens and cookies are secrets: the file is written readable by the owner only.
-        self._store: Store[dict[str, Any]] = Store(
-            hass, STORAGE_VERSION, f"{DOMAIN}.{entry.entry_id}", private=True
-        )
+        self._store: Store[dict[str, Any]] = Store(hass, STORAGE_VERSION, f"{DOMAIN}.{entry.entry_id}", private=True)
         self._state: dict[str, Any] = {}
         self._account: Account | None = None
         self.supply: Supply | None = None
         self.prefix = statistic_prefix(entry.data[CONF_SUPPLY])
-        self.category_names = dict(DEFAULT_CATEGORY_NAMES)
+        # Portal names of the categories (Italian), updated with the data.
+        self.category_names = dict(CATEGORY_NAMES[ITALIAN])
         self._lock = asyncio.Lock()
 
     # ------------------------------------------------------------ statistic ids
@@ -149,23 +145,55 @@ class PlenitudeCoordinator(DataUpdateCoordinator[PlenitudeData]):
         return self.statistic_id(f"{CATEGORY_PREFIX}{slug}")
 
     @property
-    def has_price(self) -> bool:
-        return self.config_entry.options.get(PRICE_MODE, PRICE_NONE) != PRICE_NONE
+    def cost_items(self) -> list[CostItem]:
+        """Additional costs, from the subentries of the entry."""
+        return cost_items(self.config_entry)
+
+    @property
+    def has_cost(self) -> bool:
+        return has_cost(self.config_entry.options, self.cost_items)
+
+    def _hour_price(self, local_start: datetime) -> float:
+        return hour_price(band(local_start), self.config_entry.options, self.cost_items)
+
+    def _cost_signature(self) -> str:
+        return cost_signature(self.config_entry.options, self.cost_items)
+
+    @property
+    def first_day(self) -> date | None:
+        """First day of the imported history (saved by the first import)."""
+        value = self._state.get("first_day")
+        return date.fromisoformat(value) if value else None
+
+    @property
+    def gaps_checked(self) -> str | None:
+        """Day of the last check of the recent days without data."""
+        return self._state.get("gaps_checked")
+
+    @property
+    def language(self) -> str:
+        """Language of the server, for the names stored with the statistics."""
+        return language(self.hass.config.language)
+
+    def category_name(self, slug: str) -> str:
+        if self.language == ITALIAN:
+            return self.category_names.get(slug, slug)
+        return CATEGORY_NAMES[ENGLISH].get(slug) or self.category_names.get(slug, slug)
 
     def _metadata(self, statistic_id: str) -> StatisticMetaData:
         title = self.config_entry.title
+        lang = self.language
         unit: str | None = UnitOfEnergy.KILO_WATT_HOUR
         unit_class: str | None = EnergyConverter.UNIT_CLASS
         key = statistic_id.removeprefix(f"{self.prefix}_")
         if key == STAT_ENERGY:
-            label = "consumo"
+            label = text(lang, "energy")
         elif key == STAT_COST:
-            label, unit, unit_class = "costo", CURRENCY, None
+            label, unit, unit_class = text(lang, "cost"), CURRENCY, None
         elif key in BANDS:
-            label = f"consumo {key.upper()}"
+            label = text(lang, "band", band=key.upper())
         else:
-            slug = key.removeprefix(CATEGORY_PREFIX)
-            label = f"{self.category_names.get(slug, slug)} (stima)"
+            label = text(lang, "estimate", name=self.category_name(key.removeprefix(CATEGORY_PREFIX)))
         return StatisticMetaData(
             mean_type=StatisticMeanType.NONE,
             has_sum=True,
@@ -201,9 +229,14 @@ class PlenitudeCoordinator(DataUpdateCoordinator[PlenitudeData]):
         except PlenitudeAuthError as err:
             # Gigya codes 401xxx and 403xxx: credentials refused, CAPTCHA, locked account. Asking the user is
             # the only way out; anything else (5xxxxx) is temporary.
+            placeholders = {"error": str(err)}
             if err.code // 1000 in (401, 403):
-                raise ConfigEntryAuthFailed(f"Plenitude login refused: {err}") from err
-            raise UpdateFailed(f"Plenitude login failed: {err}") from err
+                raise ConfigEntryAuthFailed(
+                    translation_domain=DOMAIN, translation_key="login_refused", translation_placeholders=placeholders
+                ) from err
+            raise UpdateFailed(
+                translation_domain=DOMAIN, translation_key="login_failed", translation_placeholders=placeholders
+            ) from err
         await self._save()
 
     async def _call[T](self, request: Callable[[], Awaitable[T]]) -> T:
@@ -225,10 +258,10 @@ class PlenitudeCoordinator(DataUpdateCoordinator[PlenitudeData]):
         for supply in supplies:
             if supply.pod and supply_key(supply.pod) == wanted:
                 if not supply.contract_id or not supply.house_id:
-                    raise UpdateFailed("The consumption analysis is not available for the configured supply")
+                    raise UpdateFailed(translation_domain=DOMAIN, translation_key="analysis_unavailable")
                 self._account, self.supply = account, supply
                 return
-        raise UpdateFailed("The configured supply is no longer in the Plenitude account")
+        raise UpdateFailed(translation_domain=DOMAIN, translation_key="supply_missing")
 
     async def _get_day(self, day: date) -> DayConsumption:
         assert self._account and self.supply
@@ -285,7 +318,11 @@ class PlenitudeCoordinator(DataUpdateCoordinator[PlenitudeData]):
             try:
                 return await self._sync()
             except (PlenitudeError, aiohttp.ClientError, TimeoutError) as err:
-                raise UpdateFailed(f"Plenitude: {err}") from err
+                raise UpdateFailed(
+                    translation_domain=DOMAIN,
+                    translation_key="communication_error",
+                    translation_placeholders={"error": str(err) or type(err).__name__},
+                ) from err
 
     async def _sync(self) -> PlenitudeData:
         await self._ensure_supply()
@@ -300,6 +337,7 @@ class PlenitudeCoordinator(DataUpdateCoordinator[PlenitudeData]):
                 _LOGGER.info("Plenitude: no consumption data available yet")
                 return PlenitudeData()
             window_start = days[0].day
+            self._state["first_day"] = window_start.isoformat()
         else:
             last_day = _local_day(dt_util.utc_from_timestamp(last[self.energy_id][0]["start"]))
             check_from = last_day + timedelta(days=1)
@@ -365,8 +403,12 @@ class PlenitudeCoordinator(DataUpdateCoordinator[PlenitudeData]):
 
         # Hours from the portal; for days it did not give back now, what is already stored is kept, so that the
         # rewritten sums stay consistent with the rows that are not rewritten.
-        stored = {} if first_import else await self._stored_states(
-            start, {self.energy_id, *(self.category_id(slug) for slug in category_slugs)}
+        stored = (
+            {}
+            if first_import
+            else await self._stored_states(
+                start, {self.energy_id, *(self.category_id(slug) for slug in category_slugs)}
+            )
         )
         energy: dict[datetime, float] = {}
         fetched_days = set()
@@ -374,7 +416,7 @@ class PlenitudeCoordinator(DataUpdateCoordinator[PlenitudeData]):
             if day.hours:
                 fetched_days.add(day.day)
                 for reading in day.hours:
-                    energy[reading.start.astimezone(timezone.utc)] = reading.kwh
+                    energy[reading.start.astimezone(UTC)] = reading.kwh
         for moment, kwh in stored.get(self.energy_id, {}).items():
             if _local_day(moment) not in fetched_days:
                 energy.setdefault(moment, kwh)
@@ -400,11 +442,11 @@ class PlenitudeCoordinator(DataUpdateCoordinator[PlenitudeData]):
                 if _local_day(moment) not in fetched:
                     categories.setdefault(slug, {}).setdefault(moment, kwh)
 
-        signature = price_signature(self.config_entry.options)
+        signature = self._cost_signature()
         rebuild_cost = not first_import and self._state.get("price_signature") != signature
         ids = {self.energy_id, *(self.band_id(name) for name in BANDS)}
         ids |= {self.category_id(slug) for slug in categories}
-        if self.has_price and not rebuild_cost:
+        if self.has_cost and not rebuild_cost:
             ids.add(self.cost_id)
         sums = {sid: 0.0 for sid in ids} if first_import else await self._sums_before(start, ids)
         rows: dict[str, list[StatisticData]] = {sid: [] for sid in ids}
@@ -413,14 +455,13 @@ class PlenitudeCoordinator(DataUpdateCoordinator[PlenitudeData]):
             sums[sid] += value
             rows[sid].append(StatisticData(start=moment, state=round(value, 6), sum=round(sums[sid], 6)))
 
-        options = self.config_entry.options
         for moment, kwh in sorted(energy.items()):
             hour_band = band(moment.astimezone(ROME))
             add(self.energy_id, moment, kwh)
             for name in BANDS:
                 add(self.band_id(name), moment, kwh if name == hour_band else 0.0)
             if self.cost_id in ids:
-                add(self.cost_id, moment, kwh * (price_of(hour_band, options) or 0.0))
+                add(self.cost_id, moment, kwh * self._hour_price(moment.astimezone(ROME)))
         for slug, series in categories.items():
             for moment, kwh in sorted(series.items()):
                 add(self.category_id(slug), moment, kwh)
@@ -436,23 +477,23 @@ class PlenitudeCoordinator(DataUpdateCoordinator[PlenitudeData]):
         return self._day_summary(last_energy_day, energy)
 
     async def _maybe_rebuild_cost(self) -> None:
-        if self._state.get("price_signature") != price_signature(self.config_entry.options):
+        signature = self._cost_signature()
+        if self._state.get("price_signature") != signature:
             await self._rebuild_cost({})
-            self._state["price_signature"] = price_signature(self.config_entry.options)
+            self._state["price_signature"] = signature
 
     async def _rebuild_cost(self, recent: dict[datetime, float]) -> None:
-        """The price changed: rewrite the whole cost history from the stored hourly consumption."""
+        """Prices or costs per kWh changed: rewrite the whole cost history from the stored hourly consumption."""
         self._clear([self.cost_id])
-        if not self.has_price:
-            _LOGGER.info("Plenitude: no price configured, cost statistic removed")
+        if not self.has_cost:
+            _LOGGER.info("Plenitude: no price and no additional cost, cost statistic removed")
             return
-        stored = await self._stored_states(datetime(2000, 1, 1, tzinfo=timezone.utc), {self.energy_id})
+        stored = await self._stored_states(datetime(2000, 1, 1, tzinfo=UTC), {self.energy_id})
         energy = {**stored.get(self.energy_id, {}), **recent}
-        options = self.config_entry.options
         total = 0.0
         data: list[StatisticData] = []
         for moment, kwh in sorted(energy.items()):
-            value = kwh * (price_of(band(moment.astimezone(ROME)), options) or 0.0)
+            value = kwh * self._hour_price(moment.astimezone(ROME))
             total += value
             data.append(StatisticData(start=moment, state=round(value, 6), sum=round(total, 6)))
         if data:
@@ -473,9 +514,8 @@ class PlenitudeCoordinator(DataUpdateCoordinator[PlenitudeData]):
         still be queued in the recorder right after a price change."""
         hours = {moment: kwh for moment, kwh in energy.items() if _local_day(moment) == day}
         cost = None
-        if self.has_price:
-            options = self.config_entry.options
-            cost = sum(kwh * (price_of(band(m.astimezone(ROME)), options) or 0.0) for m, kwh in hours.items())
+        if self.has_cost:
+            cost = sum(kwh * self._hour_price(m.astimezone(ROME)) for m, kwh in hours.items())
         return PlenitudeData(
             last_day=day,
             last_day_kwh=round(sum(hours.values()), 3),

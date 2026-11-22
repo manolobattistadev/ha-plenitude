@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import UTC, date, datetime, time, timedelta
 from unittest.mock import patch
 
 import pytest
@@ -31,8 +31,8 @@ def auto_enable_custom_integrations(recorder_mock, enable_custom_integrations):
 
 
 def day_hours(day: date) -> list[Reading]:
-    start = datetime.combine(day, time.min, ROME).astimezone(timezone.utc)
-    end = datetime.combine(day + timedelta(days=1), time.min, ROME).astimezone(timezone.utc)
+    start = datetime.combine(day, time.min, ROME).astimezone(UTC)
+    end = datetime.combine(day + timedelta(days=1), time.min, ROME).astimezone(UTC)
     count = (end - start) // timedelta(hours=1)
     return [Reading(start=(start + i * timedelta(hours=1)).astimezone(ROME), kwh=KWH_PER_HOUR) for i in range(count)]
 
@@ -53,6 +53,8 @@ class FakePortal:
 class FakeClient:
     def __init__(self, portal: FakePortal) -> None:
         self.portal = portal
+        self.login_token: str | None = "fake"
+        self.login_token_expires_at: datetime | None = None
 
     def has_portal_session(self) -> bool:
         return True

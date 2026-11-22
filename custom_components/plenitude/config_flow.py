@@ -1,4 +1,4 @@
-"""Configuration: credentials, choice of the supply, re-authentication and price options."""
+"""Configuration: credentials, choice of the supply, re-authentication, prices and additional costs."""
 
 from __future__ import annotations
 
@@ -8,7 +8,14 @@ from typing import Any
 
 import aiohttp
 import voluptuous as vol
-from homeassistant.config_entries import ConfigFlow, ConfigFlowResult, OptionsFlowWithReload
+from homeassistant.config_entries import (
+    ConfigEntry,
+    ConfigFlow,
+    ConfigFlowResult,
+    ConfigSubentryFlow,
+    OptionsFlowWithReload,
+    SubentryFlowResult,
+)
 from homeassistant.const import CONF_EMAIL, CONF_PASSWORD
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.aiohttp_client import async_create_clientsession
@@ -29,12 +36,25 @@ from .api import PlenitudeAuthError, PlenitudeClient, PlenitudeError, Supply
 from .bands import PRICE_FIELDS, PRICE_MODE, PRICE_MODES, PRICE_NONE
 from .const import CONF_SUPPLY, DOMAIN, supply_key
 from .coordinator import PlenitudeConfigEntry
+from .costs import (
+    COST_AMOUNT,
+    COST_KIND,
+    COST_KINDS,
+    COST_NAME,
+    COST_SUBENTRY,
+    KIND_MONTHLY,
+    CostItem,
+    has_valid_decimals,
+)
+from .texts import text
 
 _LOGGER = logging.getLogger(__name__)
 
 CREDENTIALS_SCHEMA = vol.Schema(
     {
-        vol.Required(CONF_EMAIL): TextSelector(TextSelectorConfig(type=TextSelectorType.EMAIL, autocomplete="username")),
+        vol.Required(CONF_EMAIL): TextSelector(
+            TextSelectorConfig(type=TextSelectorType.EMAIL, autocomplete="username")
+        ),
         vol.Required(CONF_PASSWORD): TextSelector(
             TextSelectorConfig(type=TextSelectorType.PASSWORD, autocomplete="current-password")
         ),
@@ -42,6 +62,22 @@ CREDENTIALS_SCHEMA = vol.Schema(
 )
 PRICE_SELECTOR = NumberSelector(
     NumberSelectorConfig(min=0, max=10, step="any", mode=NumberSelectorMode.BOX, unit_of_measurement="€/kWh")
+)
+# One form for every kind of cost: the unit stays "€" and the description says "per kWh" where it applies.
+# Negative amounts are allowed, for discounts and bonuses. The selector cannot step by 0.000001 (its minimum
+# step is 0.001): the six decimals are checked by the form.
+COST_SCHEMA = vol.Schema(
+    {
+        vol.Required(COST_NAME): TextSelector(),
+        vol.Required(COST_KIND): SelectSelector(
+            SelectSelectorConfig(options=list(COST_KINDS), mode=SelectSelectorMode.DROPDOWN, translation_key=COST_KIND)
+        ),
+        vol.Required(COST_AMOUNT): NumberSelector(
+            NumberSelectorConfig(
+                min=-100000, max=100000, step="any", mode=NumberSelectorMode.BOX, unit_of_measurement="€"
+            )
+        ),
+    }
 )
 
 
@@ -59,8 +95,8 @@ async def _electric_supplies(hass: HomeAssistant, email: str, password: str) -> 
 
 
 def _label(supply: Supply) -> str:
-    pod = supply.pod or ""
-    return f"{supply.address or 'Fornitura luce'} (POD …{pod[-4:]})"
+    pod = f"POD …{(supply.pod or '')[-4:]}"
+    return f"{supply.address} ({pod})" if supply.address else pod
 
 
 class PlenitudeConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -74,6 +110,11 @@ class PlenitudeConfigFlow(ConfigFlow, domain=DOMAIN):
     @callback
     def async_get_options_flow(config_entry: PlenitudeConfigEntry) -> PlenitudeOptionsFlow:
         return PlenitudeOptionsFlow()
+
+    @classmethod
+    @callback
+    def async_get_supported_subentry_types(cls, config_entry: ConfigEntry) -> dict[str, type[ConfigSubentryFlow]]:
+        return {COST_SUBENTRY: CostSubentryFlow}
 
     async def _check(self, email: str, password: str) -> tuple[list[Supply], str | None]:
         try:
@@ -127,7 +168,9 @@ class PlenitudeConfigFlow(ConfigFlow, domain=DOMAIN):
         key = supply_key(supply.pod or "")
         await self.async_set_unique_id(key)
         self._abort_if_unique_id_configured()
-        title = f"Plenitude luce …{(supply.pod or '')[-4:]}" if multiple else "Plenitude luce"
+        title = text(self.hass.config.language, "title")
+        if multiple:
+            title = f"{title} …{(supply.pod or '')[-4:]}"
         return self.async_create_entry(
             title=title, data={**self._credentials, CONF_SUPPLY: key}, options={PRICE_MODE: PRICE_NONE}
         )
@@ -178,7 +221,9 @@ class PlenitudeOptionsFlow(OptionsFlowWithReload):
             step_id="init",
             data_schema=vol.Schema(
                 {
-                    vol.Required(PRICE_MODE, default=self.config_entry.options.get(PRICE_MODE, PRICE_NONE)): SelectSelector(
+                    vol.Required(
+                        PRICE_MODE, default=self.config_entry.options.get(PRICE_MODE, PRICE_NONE)
+                    ): SelectSelector(
                         SelectSelectorConfig(
                             options=list(PRICE_MODES), mode=SelectSelectorMode.LIST, translation_key=PRICE_MODE
                         )
@@ -195,8 +240,39 @@ class PlenitudeOptionsFlow(OptionsFlowWithReload):
             )
         current = self.config_entry.options
         schema = vol.Schema({vol.Required(field): PRICE_SELECTOR for field in fields})
+        known = {f: current[f] for f in fields if f in current}
+        return self.async_show_form(step_id="prices", data_schema=self.add_suggested_values_to_schema(schema, known))
+
+
+class CostSubentryFlow(ConfigSubentryFlow):
+    """An additional cost: free name, kind (monthly, two-monthly, yearly, per kWh) and amount in euro.
+
+    Home Assistant lists the costs under the entry, with buttons to add, edit and delete them. The entry is
+    reloaded when they change (see ``__init__``), so that the cost history follows the costs per kWh.
+    """
+
+    async def async_step_user(self, user_input: dict[str, Any] | None = None) -> SubentryFlowResult:
+        return await self._form("user", user_input)
+
+    async def async_step_reconfigure(self, user_input: dict[str, Any] | None = None) -> SubentryFlowResult:
+        return await self._form("reconfigure", user_input)
+
+    async def _form(self, step_id: str, user_input: dict[str, Any] | None) -> SubentryFlowResult:
+        subentry = self._get_reconfigure_subentry() if step_id == "reconfigure" else None
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            name = str(user_input[COST_NAME]).strip()
+            amount = float(user_input[COST_AMOUNT])
+            if not name:
+                errors[COST_NAME] = "empty_name"
+            elif not has_valid_decimals(amount):
+                errors[COST_AMOUNT] = "too_many_decimals"
+            else:
+                data = CostItem(name=name, kind=user_input[COST_KIND], amount=amount).as_dict()
+                if subentry is None:
+                    return self.async_create_entry(title=name, data=data)
+                return self.async_update_and_abort(self._get_entry(), subentry, title=name, data=data)
+        suggested = user_input or (dict(subentry.data) if subentry else {COST_KIND: KIND_MONTHLY})
         return self.async_show_form(
-            step_id="prices",
-            data_schema=self.add_suggested_values_to_schema(schema, {f: current[f] for f in fields if f in current}),
-            description_placeholders={"mode": self._mode},
+            step_id=step_id, data_schema=self.add_suggested_values_to_schema(COST_SCHEMA, suggested), errors=errors
         )

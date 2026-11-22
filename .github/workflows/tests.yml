@@ -1,0 +1,54 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+      - run: pip install ruff==0.17.6
+      - run: ruff check .
+      - run: ruff format --check .
+
+  python:
+    name: Home Assistant ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: 2026.9.4 (minimum)
+            kit: pytest-homeassistant-custom-component==0.13.367
+          - name: latest
+            kit: pytest-homeassistant-custom-component
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+      - run: pip install "${{ matrix.kit }}"
+      - run: python -m pytest -q -p no:logging
+
+  cards:
+    name: Cards
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: lts/*
+      - run: node --check custom_components/plenitude/frontend/plenitude-cards.js
+      - run: node --test tests/frontend/
+        env:
+          TZ: Europe/Rome

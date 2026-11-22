@@ -1,0 +1,16 @@
+name: Feature request
+description: An idea to make the integration more useful.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: need
+    attributes:
+      label: What you would like to do
+      description: The need first, then the solution you have in mind. Puoi scrivere anche in italiano.
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: Your offer type (single price, bands), supplies, anything that helps.

@@ -1,0 +1,45 @@
+name: Bug report
+description: Something does not work as described.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Do not paste personal data.** No email, password, POD, customer or contract codes, address, statistic
+        identifiers (they contain a hash of the POD) or session files. The diagnostics file is safe to attach: it
+        leaves them out. Puoi scrivere anche in italiano.
+  - type: input
+    id: version
+    attributes:
+      label: Version of the integration
+      placeholder: "0.3.0"
+    validations:
+      required: true
+  - type: input
+    id: ha_version
+    attributes:
+      label: Home Assistant version and installation type
+      placeholder: "2026.10.4, Container"
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: >-
+        Settings → Devices & services → Eni Plenitude → ⋮ → Download diagnostics, then drag the file here.
+  - type: textarea
+    id: log
+    attributes:
+      label: Debug log
+      description: >-
+        Enable debug logging in the integration page, reproduce the problem, disable it and paste the relevant
+        lines. Read them first: remove anything personal.
+      render: text

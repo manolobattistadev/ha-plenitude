@@ -16,7 +16,7 @@ import re
 import socket
 import subprocess
 from collections import defaultdict
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from unittest.mock import patch
 
 import aiohttp
@@ -108,7 +108,13 @@ def expected_lingering_timers() -> bool:
 async def rows(hass: HomeAssistant, ids: set[str]) -> dict[str, list[dict]]:
     await async_wait_recording_done(hass)
     return await get_instance(hass).async_add_executor_job(
-        statistics_during_period, hass, datetime(2020, 1, 1, tzinfo=timezone.utc), None, ids, "hour", None,
+        statistics_during_period,
+        hass,
+        datetime(2020, 1, 1, tzinfo=UTC),
+        None,
+        ids,
+        "hour",
+        None,
         {"state", "sum"},
     )
 
@@ -197,10 +203,10 @@ async def test_live(hass: HomeAssistant, network, plain_sessions) -> None:
         if not theirs_total or not mine_total:
             continue
         month_missing = sum(1 for d in missing if (d.year, d.month) == key)
-        shares = ", ".join(
-            f"{b.upper()} {100 * (mine[b] / mine_total - theirs[b] / theirs_total):+.1f}" for b in BANDS
+        shares = ", ".join(f"{b.upper()} {100 * (mine[b] / mine_total - theirs[b] / theirs_total):+.1f}" for b in BANDS)
+        flags = (" parziale" if item.get("isPartial") else "") + (
+            f" ({month_missing} gg mancanti)" if month_missing else ""
         )
-        flags = (" parziale" if item.get("isPartial") else "") + (f" ({month_missing} gg mancanti)" if month_missing else "")
         print(f"  {key[0]}-{key[1]:02d}: totale {100 * (mine_total / theirs_total - 1):+.1f}%, {shares}{flags}")
 
     # A second sync right away must not import the history again.

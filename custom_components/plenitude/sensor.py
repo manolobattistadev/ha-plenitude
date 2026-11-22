@@ -1,4 +1,4 @@
-"""Sensors: the last day with data, its consumption and its cost.
+"""Sensors: the last day with data, its consumption and its cost (energy and costs per kWh, no periodic costs).
 
 They have no ``state_class`` on purpose: the history is in the imported statistics, and a sensor with a
 state class would produce a second, misplaced copy (the values refer to two days ago).
@@ -19,12 +19,13 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import CONF_SUPPLY, DOMAIN
 from .coordinator import CURRENCY, PlenitudeConfigEntry, PlenitudeCoordinator, PlenitudeData
+from .texts import text
 
 
 @dataclass(frozen=True, kw_only=True)
 class PlenitudeSensorDescription(SensorEntityDescription):
     value: Callable[[PlenitudeData], float | date | None]
-    needs_price: bool = False
+    needs_cost: bool = False
 
 
 SENSORS = (
@@ -49,7 +50,7 @@ SENSORS = (
         native_unit_of_measurement=CURRENCY,
         suggested_display_precision=2,
         value=lambda data: data.last_day_cost,
-        needs_price=True,
+        needs_cost=True,
     ),
 )
 
@@ -61,7 +62,7 @@ async def async_setup_entry(
     async_add_entities(
         PlenitudeSensor(coordinator, description)
         for description in SENSORS
-        if coordinator.has_price or not description.needs_price
+        if coordinator.has_cost or not description.needs_cost
     )
 
 
@@ -78,7 +79,7 @@ class PlenitudeSensor(CoordinatorEntity[PlenitudeCoordinator], SensorEntity):
             identifiers={(DOMAIN, key)},
             name=coordinator.config_entry.title,
             manufacturer="Eni Plenitude",
-            model="Fornitura luce",
+            model=text(coordinator.language, "model"),
             entry_type=DeviceEntryType.SERVICE,
         )
 

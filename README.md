@@ -1,86 +1,157 @@
-# ha-plenitude
+# Eni Plenitude for Home Assistant
 
-Integrazione personalizzata di Home Assistant per i consumi di luce dell'area clienti
-[Eni Plenitude](https://eniplenitude.com/my-eni). Le credenziali si inseriscono una volta nella configurazione
-guidata. I consumi orari vengono importati come statistiche storiche, con la loro data, e sono usabili nei
-grafici e nella dashboard Energia. Funziona con ogni tipo di installazione di Home Assistant (OS, Container,
-Core): è un'integrazione, non un add-on.
+[![HACS custom repository](https://img.shields.io/badge/HACS-custom%20repository-41BDF5)](https://hacs.xyz/docs/faq/custom_repositories/)
+[![Home Assistant 2026.9+](https://img.shields.io/badge/Home%20Assistant-2026.9%2B-18BCF2)](https://www.home-assistant.io/)
+[![Tests](https://github.com/paoloaq/ha-plenitude/actions/workflows/tests.yml/badge.svg)](https://github.com/paoloaq/ha-plenitude/actions/workflows/tests.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-> **API non ufficiali.** Le chiamate sono state ricostruite il 2026-11-22 dal traffico della webapp e possono
-> cambiare senza preavviso. Uso personale; poche richieste al giorno.
+**English** · [Italiano](README.it.md)
 
-## Stato
-- [x] Analisi delle API (login Gigya, sessione del portale, consumi quartorari, mensili per fascia)
-- [x] Client asincrono indipendente da Home Assistant: `custom_components/plenitude/api.py`
-- [x] Prototipo provato dal Mac (2026-11-22): login da script senza CAPTCHA, quarti d'ora di un giorno
-- [x] Portale scaduto dopo meno di 55 minuti di inattività (`406`), rinnovato senza password (2026-11-22)
-- [x] Integrazione: configurazione guidata, ri-autenticazione (password come riserva della sessione Gigya),
-      import delle statistiche orarie, per fascia F1/F2/F3, per categoria stimata (giornaliere) e del costo
-- [x] Test automatici (30) con il recorder vero di Home Assistant, su Home Assistant 2026.9.4 e 2026.10.4
-- [x] Prova dal vivo (2026-11-22): primo import in 6 minuti, 7439 ore in 310 giorni (dal 4/1/2026 al 20/11),
-      11 giorni mancanti; somme, fasce e costo coerenti; categorie su 321 giorni (anche nei giorni senza dati
-      orari), con somma entro lo 0,2% del misurato; la sincronizzazione successiva chiede un solo giorno
-- [ ] Tenuta della sessione Gigya di 30 giorni oltre le 24 ore (`prototipo.py stato` nei prossimi giorni)
-- [x] Card distribuite con l'integrazione (2026-11-22): grafico dei consumi e bolletta in corso; logica delle date
-      provata con Node, aspetto controllato su una pagina di prova con dati sintetici
-- [ ] Prova delle card nel Home Assistant di casa
-- [ ] Pubblicazione su GitHub e installazione da HACS
+A Home Assistant integration that brings the electricity consumption of your
+[Eni Plenitude](https://eniplenitude.com) customer area into Home Assistant:
 
-## Installazione
-Con HACS: *HACS → menu → Repository personalizzati*, indirizzo del repository, tipo *Integrazione*; poi
-installa *Eni Plenitude* e riavvia Home Assistant.
+- hourly consumption as **long-term statistics**, with its real date, ready for the Energy dashboard;
+- the same consumption split by **ARERA time band** (F1, F2, F3);
+- the **estimated categories** of the customer area (heating and cooling, washing, cooking…), day by day;
+- the **cost**, from the prices you enter (single price, two or three bands) plus **as many other costs as you
+  want** (monthly, two-monthly, yearly or per kWh: TV licence, fixed fee, system charges…);
+- two **dashboard cards**: a consumption chart with a period of your choice, and the **current bill** (kWh and
+  euro of the billing period so far, with an estimate at the end of the period).
 
-A mano: copia `custom_components/plenitude` nella cartella `custom_components` della configurazione di Home
-Assistant (con Docker è la cartella montata su `/config`) e riavvia.
+It is an integration, not an add-on: it works with every installation type (Home Assistant OS, Container, Core).
 
-Poi *Impostazioni → Dispositivi e servizi → Aggiungi integrazione → Eni Plenitude*, con email e password
-dell'area clienti. Se l'account ha più forniture luce si sceglie quale importare.
+> [!IMPORTANT]
+> **Unofficial.** This project is not affiliated with, endorsed or supported by Eni Plenitude or Eni. It uses
+> the same web services as the customer area, which are not documented and can change without notice. It makes
+> a few requests a day, like a person checking the customer area.
 
-Versione minima di Home Assistant: 2026.9 (i test girano su 2026.9.4 e 2026.10.4).
+## Contents
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [Configuration](#configuration)
+- [What you get](#what-you-get)
+- [Cards](#cards)
+- [How it works](#how-it-works)
+- [Languages](#languages)
+- [Privacy and security](#privacy-and-security)
+- [Troubleshooting](#troubleshooting)
+- [Removal](#removal)
+- [Limitations](#limitations)
+- [Development](#development)
 
-## Cosa fa
-- **Sessione.** Al primo accesso chiede a Plenitude una sessione di 30 giorni; il portale scade dopo meno di
-  un'ora di inattività e viene riaperto con la sessione, senza password. La password si usa solo quando la
-  sessione di 30 giorni è finita. Se Plenitude rifiuta il login, Home Assistant chiede di inserirla di nuovo.
-  Sessione e cookie stanno in `.storage/plenitude.<id>`, leggibile solo dal proprietario.
-- **Primo import.** Scarica lo storico un giorno alla volta, all'indietro da ieri, finché trova 31 giorni di
-  fila senza dati (al massimo 3 anni). Ci vogliono alcuni minuti; avviene in background.
-- **Aggiornamenti.** Ogni 6 ore chiede i giorni nuovi (i dati arrivano con circa 2 giorni di ritardo). Una
-  volta al giorno richiede anche i giorni mancanti delle ultime 2 settimane, nel caso arrivino in ritardo.
-- **Cambio d'ora.** Gli orari si ricostruiscono dalla posizione dei valori, perché il server etichetta male i
-  giorni del cambio; un giorno con un numero di valori diverso dalla sua durata non viene importato.
+## Requirements
+- Home Assistant **2026.9** or later.
+- An Eni Plenitude customer area account with **email and password** (sign-in with social accounts is not
+  supported).
+- An **electricity** supply for which the customer area shows the consumption analysis (consumption every
+  15 minutes, usually available with second-generation smart meters). Gas is not supported yet.
 
-## Statistiche importate
-`<p>` è `plenitude:luce_<chiave>`, dove la chiave è un hash del POD (il POD non viene salvato).
+## Installation
 
-| Statistica | Unità | Contenuto |
+### With HACS (recommended)
+1. In Home Assistant open **HACS**, then the menu **⋮ → Custom repositories**.
+2. Add `https://github.com/paoloaq/ha-plenitude` with type **Integration**.
+3. Search for **Eni Plenitude**, open it and select **Download**.
+4. Restart Home Assistant.
+
+### Manually
+1. Download the [latest release](https://github.com/paoloaq/ha-plenitude/releases/latest) and copy the folder
+   `custom_components/plenitude` into the `custom_components` folder of your Home Assistant configuration (the
+   folder that contains `configuration.yaml`; with Docker, the folder mounted on `/config`).
+2. Restart Home Assistant.
+
+## Configuration
+1. Go to **Settings → Devices & services → Add integration** and search for **Eni Plenitude**.
+2. Enter the email and password of the customer area.
+3. If the account has more than one electricity supply, choose the one to import. To import another one, add
+   the integration again.
+
+The first import starts right away, in the background: it reads the history one day at a time, going back from
+yesterday until it finds a month without data (at most three years). It takes a few minutes.
+
+### Prices and costs
+Plenitude does not expose the price of your offer, so the cost is computed from prices and costs you enter.
+
+**Price of the energy.** Open **Settings → Devices & services → Eni Plenitude → Configure**:
+
+| Price type | Fields |
+|---|---|
+| No price | consumption only |
+| Single price | one price per kWh for every hour |
+| Two bands | F1 and F23 (F2 + F3) |
+| Three bands | F1, F2 and F3 |
+
+**Other costs.** In the same page select **Add cost**, as many times as you need. Each cost has:
+- **Name**: free text, for example TV licence, fixed fee, power, system charges;
+- **Type**: monthly, every two months, yearly or per kWh;
+- **Amount**: in euro (euro per kWh for the costs per kWh), at most 6 decimals. Use a negative amount for a
+  discount.
+
+The costs are listed under the integration, where you can edit or delete them.
+
+How they are counted:
+- **Per kWh** costs are added to the price of every hour: they are in the cost statistic, in the Energy dashboard,
+  in the sensor and in the cards. When prices or costs per kWh change, the cost of the whole history is
+  recomputed.
+- **Monthly, two-monthly and yearly** costs do not depend on the hours, so they are **not** in the cost statistic
+  nor in the Energy dashboard. The cards spread them over the days: `amount × times a year / days of the year`
+  (12 times for monthly, 6 for two-monthly, once for yearly), from the first to the last day with data. The
+  current bill card lists every cost.
+
+**Getting close to the bill.** Use the energy price of your offer as the price, then add the other lines of a bill
+as costs: transport, system charges and excise duty per kWh; fixed fee, power and TV licence as periodic costs.
+Include VAT in every amount.
+
+## What you get
+
+### Statistics
+The integration imports long-term statistics with source `plenitude`. In the identifiers, `<p>` is
+`plenitude:luce_<key>`, where the key is a short hash of the supply's POD.
+
+| Statistic | Unit | Content |
 |---|---|---|
-| `<p>_consumo` | kWh | consumo misurato, ora per ora |
-| `<p>_f1`, `<p>_f2`, `<p>_f3` | kWh | lo stesso consumo diviso per fascia ARERA (0 nelle ore delle altre fasce) |
-| `<p>_costo` | EUR | kWh × prezzo della fascia, solo se il prezzo è configurato |
-| `<p>_cat_<categoria>` | kWh | ripartizione **stimata** da Plenitude, un valore al giorno (a mezzanotte) |
+| `<p>_consumo` | kWh | measured consumption, hour by hour |
+| `<p>_f1`, `<p>_f2`, `<p>_f3` | kWh | the same consumption split by ARERA band (0 in the hours of the other bands) |
+| `<p>_costo` | EUR | kWh × (price of the band + costs per kWh), with a price or a cost (periodic costs excluded) |
+| `<p>_cat_<category>` | kWh | the **estimated** split of the customer area, one value per day |
 
-Categorie: `refrigerare`, `standby`, `lavare`, `cucinare`, `comfort_ambientale`, `elettronica_luci`,
-`ricarica_elettrica`, `altro`.
+Categories: `comfort_ambientale` (heating and cooling), `standby`, `lavare` (washing), `elettronica_luci`
+(electronics and lighting), `refrigerare` (refrigeration), `cucinare` (cooking), `ricarica_elettrica`
+(EV charging), `altro` (other).
 
-Sensori (per sapere a che punto è l'import): *Ultimo giorno disponibile*, *Consumo dell'ultimo giorno* e, con
-il prezzo, *Costo dell'ultimo giorno*. Non hanno `state_class`: la storia è nelle statistiche.
+The names of the statistics follow the language of the server, for example *Plenitude electricity consumption*
+or *Plenitude luce consumo*.
 
-**Dashboard Energia:** *Impostazioni → Dashboard → Energia → Aggiungi consumo dalla rete*, statistica
-*Plenitude luce consumo*; come costo scegli *Usa un'entità che tiene traccia dei costi totali* e la
-statistica *Plenitude luce costo*. Home Assistant non calcola il costo di una statistica importata con un
-prezzo fisso: per questo il costo lo calcola l'integrazione.
+### Sensors
+| Sensor | Content |
+|---|---|
+| Last day available | the most recent day with data |
+| Consumption of the last day | kWh of that day |
+| Consumption cost of the last day | euro of that day: energy and costs per kWh, no periodic costs |
 
-## Card
-L'integrazione porta con sé due card e le carica da sola in ogni dashboard: non vanno installate né aggiunte
-alle risorse. Si trovano in *Modifica dashboard → Aggiungi card* (cercando "Plenitude") e si configurano
-dall'editor visuale. Leggono le statistiche importate.
+They show how far the import has got. They have no `state_class` on purpose: the history is in the statistics,
+with the right dates.
 
-**Consumi** (`custom:plenitude-consumption-card`): grafico a colonne. Nelle impostazioni si scelgono il periodo
-di default (giorno, settimana, mese, anno), la vista (totale, fasce, categorie) e l'unità (kWh o €). Sulla card
-si cambiano periodo, vista e unità, ci si sposta avanti e indietro con le frecce e si torna agli ultimi dati.
-Il passaggio del mouse (o il tocco) mostra i valori di ogni colonna; *Tabella* li mostra tutti. Le categorie sono
-stime giornaliere, quindi non compaiono nella vista del giorno e solo in kWh.
+### Energy dashboard
+1. **Settings → Dashboards → Energy → Electricity grid → Add consumption.**
+2. As consumption choose the statistic *Plenitude electricity consumption* (*Plenitude luce consumo* on an Italian
+   server).
+3. With a price or costs, choose **Use an entity tracking the total costs** and the statistic *Plenitude electricity
+   cost* (*Plenitude luce costo*).
+
+Home Assistant cannot compute the cost of imported statistics from a price, so the integration computes it.
+Data arrive about two days late: the last two days stay empty until Plenitude publishes them.
+
+## Cards
+The integration ships two cards and loads them on every dashboard by itself. You do not need to install them or
+to add them as resources. In a dashboard select **Edit → Add card**, search for **Plenitude** and configure them
+in the visual editor. The cards follow the language of your user profile (Italian or English) and the light or
+dark theme.
+
+### Consumption
+A column chart. In the settings you choose the default period, view and unit. On the card you can change them,
+move back and forth, and go back to the latest data. Hover or tap a column to see its values; **Table** shows
+them all.
 
 ```yaml
 type: custom:plenitude-consumption-card
@@ -89,103 +160,113 @@ view: bands        # total | bands | categories
 unit: kwh          # kwh | eur
 ```
 
-**Bolletta in corso** (`custom:plenitude-billing-card`): consumo e costo dall'inizio del periodo di
-fatturazione all'ultimo giorno con dati, ripartiti per fascia, con l'avanzamento del periodo, una stima a fine
-periodo (media dei giorni con dati × durata) e le colonne giorno per giorno. `start_date` è il primo giorno di un
-qualsiasi periodo di fatturazione (lo si legge su una bolletta): i periodi si ripetono ogni `months` mesi da lì.
-Le frecce mostrano i periodi passati, da confrontare con le bollette.
+- **Categories** are daily estimates: they are not available in the day view, and only in kWh.
+- **In euro**, the monthly, two-monthly and yearly costs appear as the gray segment at the bottom of the columns.
+
+### Current bill
+Consumption and cost from the start of the current billing period to the last day with data. It also shows:
+- the split by band;
+- the progress through the period;
+- the cost breakdown: energy, then every cost you entered;
+- an estimate at the end of the period (average of the days with data × length of the period, plus the periodic
+  costs of the whole period);
+- the columns day by day.
+
+Use the arrows to see past periods and compare them with your bills.
 
 ```yaml
 type: custom:plenitude-billing-card
-start_date: "2026-11-01"
-months: 2          # 2 = bimestre, 1 = mese
+start_date: "2026-11-01"   # first day of any billing period (read it on a bill)
+months: 2                  # 2 = two-month periods, 1 = monthly periods
 ```
 
-Entrambe accettano `title` ed `entry` (l'id della voce, se ci sono più forniture). Colori: palette categoriale
-validata per il daltonismo sugli sfondi chiaro e scuro delle card; le fasce sono sempre blu (F1), arancio (F2) e
-verde acqua (F3).
+Billing periods repeat every `months` months from `start_date`. If the start date is the 31st, shorter months
+end on their last day.
 
-## Prezzo
-Plenitude non espone il prezzo dell'offerta, quindi va inserito nelle opzioni dell'integrazione
-(*Configura*): nessuno, unico (monoraria), due fasce F1 e F23 (bioraria) o tre fasce F1, F2, F3. Se cambia,
-il costo di tutto lo storico viene ricalcolato con il nuovo prezzo.
+Both cards also accept `title` and `entry` (the configuration entry, when you have more than one supply).
 
-Fasce ARERA (delibera 181/06, tabella 1): F1 lunedì-venerdì 8-19; F2 lunedì-venerdì 7-8 e 19-23, sabato
-7-23; F3 notti 23-7, domeniche e festivi. Festivi: 1 e 6 gennaio, lunedì di Pasqua, 25 aprile, 1 maggio,
-2 giugno, 15 agosto, 1 novembre, 8, 25 e 26 dicembre. Il 4 ottobre (festa nazionale dal 2026) non è nella
-tabella ARERA e per ora è trattato come giorno feriale.
+## How it works
+- **Session.** At the first login the integration asks Plenitude for a 30-day session. The customer area session
+  expires after less than an hour of inactivity and is reopened with the 30-day session, without the password.
+  The password is used again only when the 30-day session is over. If Plenitude refuses it, Home Assistant asks
+  you to sign in again in **Settings → Devices & services**.
+- **Updates.** Every 6 hours the integration asks for the new days (data arrive about two days late). Once a day
+  it also asks again for the days of the last two weeks that had no data, in case they arrived late.
+- **Daylight saving time.** On the days the clock changes, the hours are rebuilt from the position of the values,
+  because the server labels them wrongly. A day whose number of values does not match its length is skipped.
+- **ARERA bands** ([deliberation 181/06](https://www.arera.it/atti-e-provvedimenti/dettaglio/06/181-06),
+  table 1):
+  - F1: Monday to Friday 8:00–19:00;
+  - F2: Monday to Friday 7:00–8:00 and 19:00–23:00, Saturday 7:00–23:00;
+  - F3: nights 23:00–7:00, Sundays and holidays.
 
-## Limiti
-- I consumi mensili per fascia del portale (`consumptionData`) non coincidono con i mesi di calendario dei
-  dati orari (differenze del totale da -46% a +58% da un mese all'altro, 2026-11-22): sembrano periodi di
-  lettura o di fatturazione. Per questo non vengono importati e non servono a verificare le fasce.
-- Le statistiche di Home Assistant sono orarie: i quarti d'ora si sommano per ora.
-- Le categorie sono stime di Plenitude e arrivano solo giorno per giorno.
-- Solo luce; il gas non è ancora gestito.
+  Holidays: 1 and 6 January, Easter Monday, 25 April, 1 May, 2 June, 15 August, 1 November, 8, 25 and
+  26 December. 4 October (a national holiday again since 2026) is not in the ARERA table and is treated as a
+  working day.
 
-## Struttura
-```
-custom_components/plenitude/
-  api.py          client dell'area clienti (solo aiohttp, nessuna dipendenza da Home Assistant)
-  bands.py        fasce ARERA e prezzi (nessuna dipendenza da Home Assistant)
-  coordinator.py  sessione, scelta dei giorni da scaricare, import delle statistiche
-  config_flow.py  configurazione guidata, ri-autenticazione, opzioni del prezzo
-  sensor.py       sensori dell'ultimo giorno
-  websocket.py    comando plenitude/info per le card (quali statistiche e prezzi, nessun valore)
-  frontend/plenitude-cards.js   le due card (JavaScript senza dipendenze, SVG disegnato a mano)
-scripts/prototipo.py   prova da riga di comando sul Mac
-tests/                 test automatici; tests/live: prova dal vivo (manuale)
-```
+## Languages
+Italian and English; every other language falls back to English.
 
-## Test
-```sh
-/opt/homebrew/bin/python3.14 -m venv ~/venvs/ha-plenitude-test
-~/venvs/ha-plenitude-test/bin/pip install -r requirements-test.txt
-~/venvs/ha-plenitude-test/bin/python -m pytest -q -p no:logging
-```
-Stessi test su un'altra versione di Home Assistant: un ambiente con il kit corrispondente (per la 2026.9.4,
-`pytest-homeassistant-custom-component==0.13.367`).
+| What | Follows |
+|---|---|
+| Configuration, options, entity names, errors | the language of each user |
+| Cards | the language of each user's profile |
+| Names of the statistics, title of the entry, device model | the language of the server when they are created |
 
-Card: logica delle date (bimestri, cambio d'ora) con Node, aspetto su una pagina con dati sintetici:
-```sh
-TZ=Europe/Rome node --test tests/frontend/
-"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless=new --screenshot=/tmp/card.png \
-  --window-size=1180,2300 --virtual-time-budget=4000 "file://$PWD/tests/frontend/harness.html"
-```
-Prova dal vivo contro il portale, in un Home Assistant di prova con il recorder vero (credenziali dal
-Portachiavi; stampa solo conteggi e differenze, mai consumi o codici):
-```sh
-PLENITUDE_LIVE=1 ~/venvs/ha-plenitude-test/bin/python -m pytest -s -p no:logging --tb=line tests/live
-```
+## Privacy and security
+- **Credentials.** Email and password are kept in the configuration entry, like every integration that signs in
+  to a service. They are sent only to the Plenitude sign-in service (`login.eniplenitude.com`).
+- **Session.** Tokens and cookies are kept in `.storage/plenitude.<entry id>`, readable only by the owner of the
+  file.
+- **No other destinations.** The integration talks only to `eniplenitude.com` and `login.eniplenitude.com`, with
+  no analytics or telemetry. The cards read the statistics from your Home Assistant only.
+- **POD.** The supply's POD is not stored. Statistics and entities use a short hash of it. The hash is not a
+  secret (the POD can be found again by trying), so do not publish your statistic identifiers.
+- **Diagnostics.** *Download diagnostics* removes credentials, tokens, POD, supply key, address and consumption
+  values, so you can attach it to an issue.
 
-## Prototipo sul Mac
+To report a vulnerability, see [SECURITY.md](SECURITY.md).
 
-Ambiente (una volta):
-```sh
-/opt/homebrew/bin/python3.14 -m venv ~/venvs/ha-plenitude
-~/venvs/ha-plenitude/bin/pip install -r requirements-dev.txt
-```
+## Troubleshooting
+- **Debug log.** In the integration's page select **Enable debug logging**, reproduce the problem, then disable
+  it to download the log. Or in `configuration.yaml`:
+  ```yaml
+  logger:
+    logs:
+      custom_components.plenitude: debug
+  ```
+  The integration does not write credentials or tokens to the log; still, read the log before sharing it.
+- **"Plenitude refused the login".** The password changed, or Plenitude asks for an additional verification. Sign
+  in to the customer area with a browser, then open the request to sign in again in **Settings → Devices &
+  services** and enter the password.
+- **Some days are missing.** The customer area itself sometimes has no data for some days. The integration asks
+  again for the missing days of the last two weeks, once a day.
+- **The cards do not appear** in *Add card*. Make sure the integration is loaded, then reload the page without
+  the cache (or clear the cache of the companion app). Do not add the cards as dashboard resources: the
+  integration loads them.
+- **The cost differs from the bill.** See [Prices and costs](#prices-and-costs): enter every line of the bill as a
+  cost, VAT included. Bills may also contain adjustments and estimated readings.
 
-Credenziali nel Portachiavi (una volta; la password viene chiesta senza mostrarla e non resta nella cronologia
-della shell):
-```sh
-security add-generic-password -s ha-plenitude -a 'EMAIL-DELL-AREA-CLIENTI' -w
-```
+## Removal
+1. **Settings → Devices & services → Eni Plenitude → ⋮ → Delete.**
+2. The imported statistics stay in the database. To delete them, go to **Developer tools → Statistics**, search
+   for `plenitude` and delete them.
+3. With HACS, remove the integration from HACS too, then restart Home Assistant.
 
-Uso:
-```sh
-~/venvs/ha-plenitude/bin/python scripts/prototipo.py login           # login, durata delle sessioni
-~/venvs/ha-plenitude/bin/python scripts/prototipo.py stato           # le sessioni salvate valgono ancora?
-~/venvs/ha-plenitude/bin/python scripts/prototipo.py consumi         # un giorno (due giorni fa)
-~/venvs/ha-plenitude/bin/python scripts/prototipo.py consumi --giorno 2026-11-20 --valori
-```
+## Limitations
+- Home Assistant statistics are hourly: the 15-minute values are summed by hour.
+- Categories are estimates of Plenitude and come only day by day.
+- The monthly values by band of the customer area are not used: they do not match calendar months (they look
+  like reading or billing periods).
+- The cost is an estimate from your prices: bills also contain taxes, adjustments and estimated readings that the
+  integration cannot know.
+- Electricity only; gas is not supported yet.
 
-La sessione viene salvata in `~/.cache/ha-plenitude/sessione.json` con permessi `600`: contiene token e cookie,
-quindi non va copiata né messa nel repository. Senza `--valori` lo script non stampa identificativi né consumi.
+## Development
+See [CONTRIBUTING.md](CONTRIBUTING.md): structure of the code, tests on the minimum and latest Home Assistant, the
+cards' test page, and how to release. Notes on the customer area's web services are in
+[docs/protocol.md](docs/protocol.md). Changes are listed in [CHANGELOG.md](CHANGELOG.md).
 
-## Sessioni (misurate il 2026-11-22)
-| Elemento | Durata | Rinnovo |
-|---|---|---|
-| `id_token` (JWT) | 60 s da `accounts.login`, 300 s da `accounts.getJWT` | si chiede quando serve |
-| Sessione Gigya (`login_token`) | quella chiesta con `sessionExpiration`: 3000 s nella webapp; **30 giorni concessi** quando chiesti | con la password; tenuta reale a 30 giorni da misurare |
-| Sessione del portale (`GYSESSION`, `G-GENUI`) | cookie validi 24 h (`Max-Age=86400`), ma il server la chiude prima: dopo **meno di 55 minuti di inattività** risponde `HTTP 406` | **senza password**, con `getJWT` + `getJwe`, finché la sessione Gigya vale (provato il 2026-11-22) |
+## License
+[MIT](LICENSE). *Eni Plenitude* and *Plenitude* are trademarks of their owners and are used here only to say
+which service the integration works with.
