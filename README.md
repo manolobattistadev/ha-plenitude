@@ -11,8 +11,19 @@ nella dashboard Energia. Funziona con ogni tipo di installazione di Home Assista
 ## Stato
 - [x] Analisi delle API (login Gigya, sessione del portale, consumi quartorari, mensili per fascia)
 - [x] Client asincrono indipendente da Home Assistant: `custom_components/plenitude/api.py`
-- [ ] Prototipo provato dal Mac: login, durata delle sessioni, un giorno di quarti d'ora
+- [x] Prototipo provato dal Mac (2026-11-22): login da script senza CAPTCHA, quarti d'ora di un giorno
+- [ ] Misura della durata reale delle sessioni (portale dopo inattività, Gigya a 30 giorni)
 - [ ] Integrazione: configurazione guidata, ri-autenticazione, import delle statistiche, HACS
+
+## Comportamento dei dati (verificato il 2026-11-22)
+- Storico quartorario dal **4 gennaio 2026**; i dati arrivano con circa **2 giorni** di ritardo.
+- Ci sono **giorni mancanti** (`status: NO_DATA`), per esempio 1-3/01, 9 giorni di febbraio, 15/03 e
+  25/10: l'integrazione deve saltarli senza interrompere la somma cumulativa.
+- Il server usa solo la **data** di `startTime`, non l'ora.
+- **Cambio d'ora:** il 29/03 il server restituisce 92 quarti d'ora (giusto) ma con etichette e timestamp
+  spostati di un'ora dopo le 02:00. Il client ricostruisce gli orari dalla posizione (mezzanotte italiana +
+  *i* × 15 minuti, in UTC) e scarta il giorno se il numero di valori non corrisponde alla durata del giorno.
+  Il 25/10 (25 ore) manca del tutto.
 
 ## Struttura
 ```
@@ -49,5 +60,5 @@ quindi non va copiata né messa nel repository. Senza `--valori` lo script non s
 | Elemento | Durata | Rinnovo |
 |---|---|---|
 | `id_token` (JWT) | 60 s da `accounts.login`, 300 s da `accounts.getJWT` | si chiede quando serve |
-| Sessione Gigya (`login_token`) | 3000 s, il valore chiesto dalla webapp | con la password; da provare se Gigya concede durate più lunghe |
+| Sessione Gigya (`login_token`) | quella chiesta con `sessionExpiration`: 3000 s nella webapp; **30 giorni concessi** quando chiesti dal prototipo (`--durata 2592000`) | con la password; tenuta reale a 30 giorni da misurare |
 | Sessione del portale (`GYSESSION`, `G-GENUI`) | cookie validi 24 h (`Max-Age=86400`); scadenza reale da misurare | senza password finché la sessione Gigya vale |

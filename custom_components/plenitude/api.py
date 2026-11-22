@@ -96,12 +96,17 @@ class Reading:
 
 @dataclass
 class DayConsumption:
-    """Consumption of one day as returned by the ``FIFTEEN_DAILY`` view."""
+    """Consumption of one day as returned by the ``FIFTEEN_DAILY`` view.
+
+    Timestamps are rebuilt from the position of each value (see ``_sequence``). ``server_timestamps_ok``
+    tells whether the server's own timestamps agreed: they do not on DST days.
+    """
 
     day: date
     status: str | None
     hours: list[Reading]
     quarter_hours: list[Reading]
+    server_timestamps_ok: bool = True
 
 
 def token_lifetime(jwt: str) -> int:
@@ -124,6 +129,30 @@ def day_period(day: date) -> dict[str, str]:
     """
     next_midnight = datetime.combine(day + timedelta(days=1), time.min, ROME)
     return {"startTime": _utc_iso(next_midnight), "endTime": f"{day.isoformat()}T00:00:00.000Z"}
+
+
+def _sequence(items: list[dict[str, Any]] | None, day: date, step: timedelta) -> tuple[list[Reading], bool]:
+    """Assign each value of a day to its interval by position, starting from local midnight.
+
+    The server mislabels DST days: on 2026-03-29 it skips both 02:xx and 03:xx and runs one hour into
+    the next day, although it returns the right number of values (92 quarter-hours, 23 hours). Real time
+    is continuous, so value ``i`` covers ``midnight + i * step`` (computed in UTC). If the count does not
+    match the length of the day the series is rejected (empty list) rather than imported wrongly.
+    Returns the readings and whether the server timestamps matched the rebuilt ones.
+    """
+    items = items or []
+    start = datetime.combine(day, time.min, ROME).astimezone(timezone.utc)
+    end = datetime.combine(day + timedelta(days=1), time.min, ROME).astimezone(timezone.utc)
+    if not items or len(items) != (end - start) // step:
+        return [], not items
+    readings, server_ok = [], True
+    for index, item in enumerate(items):
+        moment = start + index * step
+        if item.get("startTime") and int(item["startTime"]) != int(moment.timestamp()):
+            server_ok = False
+        if item.get("consumption") is not None:
+            readings.append(Reading(start=moment.astimezone(ROME), kwh=float(item["consumption"])))
+    return readings, server_ok
 
 
 def _readings(items: list[dict[str, Any]] | None) -> list[Reading]:
@@ -338,11 +367,14 @@ class PlenitudeClient:
             "POST", f"/api/profilo-energetico-services/{account.account_code}/analysis/consumptions", body=body
         )
         total = next(iter((data or {}).get("consumptionList") or []), {})
+        hours, hours_ok = _sequence(total.get("data"), day, timedelta(hours=1))
+        quarters, quarters_ok = _sequence((data or {}).get("additionalData"), day, timedelta(minutes=15))
         return DayConsumption(
             day=day,
             status=(data or {}).get("status"),
-            hours=_readings(total.get("data")),
-            quarter_hours=_readings((data or {}).get("additionalData")),
+            hours=hours,
+            quarter_hours=quarters,
+            server_timestamps_ok=hours_ok and quarters_ok,
         )
 
     async def get_monthly_by_band(self, account: Account) -> list[dict[str, Any]]:

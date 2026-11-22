@@ -145,9 +145,10 @@ async def cmd_consumi(args: argparse.Namespace) -> None:
         salva_stato(client)
         dati = await client.get_day(conto, fornitura, giorno)
     q, h = dati.quarter_hours, dati.hours
-    print(f"Giorno {giorno:%d/%m/%Y}: stato {dati.status}; {len(h)} valori orari, {len(q)} quarti d'ora.")
+    print(f"Giorno {giorno:%d/%m/%Y}: stato {dati.status}; {len(h)} valori orari, {len(q)} quarti d'ora; "
+          f"timestamp del server corretti: {'sì' if dati.server_timestamps_ok else 'NO, ricostruiti dalla posizione'}.")
     if not q:
-        print("Nessun quarto d'ora: il giorno potrebbe non essere ancora disponibile.")
+        print("Nessun quarto d'ora: giorno non ancora disponibile, mancante o con un numero di valori incoerente.")
         return
     giorni = {r.start.date() for r in q}
     somma_q, somma_h = sum(r.kwh for r in q), sum(r.kwh for r in h)
