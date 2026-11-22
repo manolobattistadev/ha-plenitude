@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+
+# macOS
+.DS_Store
+
+# Mai nel repository: catture del traffico, sessioni, credenziali
+*.har
+sessione*.json
+.env
+secrets.yaml
