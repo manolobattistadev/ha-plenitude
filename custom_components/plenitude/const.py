@@ -6,6 +6,11 @@ import hashlib
 from datetime import timedelta
 
 DOMAIN = "plenitude"
+VERSION = "0.2.0"
+
+# Cards (frontend/plenitude-cards.js), served by the integration and loaded by the frontend.
+CARDS_URL = "/plenitude_static"
+CARDS_FILE = "plenitude-cards.js"
 
 CONF_SUPPLY = "supply"  # key of the supply: hash of the POD, never the POD itself
 
@@ -28,6 +33,17 @@ STORAGE_VERSION = 1
 STAT_ENERGY = "consumo"
 STAT_COST = "costo"
 CATEGORY_PREFIX = "cat_"
+# Order in which the portal lists the categories ("altro" last): the cards keep it, colors follow it.
+CATEGORY_ORDER = (
+    "comfort_ambientale",
+    "standby",
+    "lavare",
+    "elettronica_luci",
+    "refrigerare",
+    "cucinare",
+    "ricarica_elettrica",
+    "altro",
+)
 
 
 def supply_key(pod: str) -> str:

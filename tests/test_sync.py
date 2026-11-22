@@ -178,3 +178,43 @@ async def test_price_change_rebuilds_cost(
     await hass.config_entries.async_reload(entry.entry_id)
     await hass.async_block_till_done(wait_background_tasks=True)
     assert await rows(hass, COST) == []
+
+
+async def test_info_for_the_cards(hass: HomeAssistant, hass_ws_client, fake_client: FakePortal) -> None:
+    # Real time here: the access token of the websocket client expires 30 minutes after it is issued.
+    last_day = datetime.now(ROME).date() - timedelta(days=2)
+    fake_client.days = days(last_day - timedelta(days=19), last_day)
+    entry = await setup(hass, THREE_BANDS)
+    client = await hass_ws_client(hass)
+    await client.send_json({"id": 1, "type": "plenitude/info"})
+    reply = await client.receive_json()
+    assert reply["success"]
+    (info,) = reply["result"]["entries"]
+    assert info["entry_id"] == entry.entry_id
+    assert info["last_day"] == last_day.isoformat()
+    assert info["prices"] == {"f1": 0.30, "f2": 0.25, "f3": 0.20}
+    assert info["statistics"] == {
+        "consumo": ENERGY,
+        "f1": f"{PREFIX}_f1",
+        "f2": f"{PREFIX}_f2",
+        "f3": f"{PREFIX}_f3",
+        "costo": COST,
+    }
+    assert [c["key"] for c in info["categories"]][-1] == "altro"
+    assert POD not in str(reply)  # no customer identifiers towards the browser
+
+
+async def test_cards_registered_with_the_frontend(hass: HomeAssistant) -> None:
+    """With the frontend loaded the cards are served and added to every dashboard, with a cache-busting hash."""
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from custom_components.plenitude import _async_register_cards
+
+    hass.config.components.add("frontend")
+    hass.http = MagicMock(async_register_static_paths=AsyncMock())
+    with patch("homeassistant.components.frontend.add_extra_js_url") as add_js:
+        await _async_register_cards(hass)
+    (configs,) = hass.http.async_register_static_paths.call_args.args
+    assert configs[0].url_path == "/plenitude_static" and configs[0].path.endswith("frontend")
+    url = add_js.call_args.args[1]
+    assert url.startswith("/plenitude_static/plenitude-cards.js?v=") and len(url.split("=")[1]) == 8
