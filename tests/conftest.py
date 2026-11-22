@@ -45,6 +45,7 @@ class FakePortal:
     hidden: set[date] = field(default_factory=set)
     day_requests: list[date] = field(default_factory=list)
     logins: int = 0
+    logouts: int = 0
 
     def available(self, day: date) -> bool:
         return day in self.days and day not in self.hidden
@@ -65,6 +66,9 @@ class FakeClient:
     async def login(self, email, password, session_expiration=3000):
         self.portal.logins += 1
         return {}
+
+    async def logout(self, account=None) -> None:
+        self.portal.logouts += 1
 
     def export_state(self) -> dict:
         return {}

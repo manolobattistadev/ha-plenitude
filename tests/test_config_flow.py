@@ -12,9 +12,10 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.plenitude.api import PlenitudeAuthError, PlenitudeSessionExpired, Supply
 from custom_components.plenitude.bands import PRICE_MODE
+from custom_components.plenitude.config_flow import _electric_supplies
 from custom_components.plenitude.const import CONF_SUPPLY, DOMAIN, supply_key
 
-from .conftest import POD
+from .conftest import POD, FakeClient, FakePortal
 
 OTHER_POD = "IT001E88888888"  # fake
 CREDENTIALS = {"email": "test@example.com", "password": "secret"}
@@ -170,3 +171,19 @@ async def test_costs(hass: HomeAssistant) -> None:
     assert result["type"] is FlowResultType.ABORT and result["reason"] == "reconfigure_successful"
     assert entry.subentries[subentry_id].title == "Canone TV"
     assert dict(entry.subentries[subentry_id].data) == {"name": "Canone TV", "kind": "monthly", "amount": 9.0}
+
+
+@pytest.mark.parametrize("refused", [False, True])
+async def test_the_throw_away_login_is_closed(hass: HomeAssistant, refused: bool) -> None:
+    """The login of the configuration is closed, also when the portal refuses the data."""
+    portal = FakePortal()
+    client = FakeClient(portal)
+    if refused:
+        client.get_supplies = AsyncMock(side_effect=PlenitudeSessionExpired("HTTP 401"))
+    with patch("custom_components.plenitude.config_flow.PlenitudeClient", return_value=client):
+        if refused:
+            with pytest.raises(PlenitudeSessionExpired):
+                await _electric_supplies(hass, "test@example.com", "secret")
+        else:
+            assert len(await _electric_supplies(hass, "test@example.com", "secret")) == 1
+    assert (portal.logins, portal.logouts) == (1, 1)

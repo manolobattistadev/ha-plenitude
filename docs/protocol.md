@@ -18,14 +18,26 @@ Steps 2 and 3 can be repeated without the password while the Gigya session is al
 Gigya error codes `401xxx` and `403xxx` (wrong credentials, CAPTCHA required, locked account) need the user;
 `5xxxxx` are temporary. In Home Assistant the first start a re-authentication, the second a retry.
 
-### Browser identity
-From the afternoon of 2026-11-22 the account services (`contiServices`, `profilo-energetico-services`) answered
-`HTTP 401` with `{"error":"Unauthorized"}` to every new session of the client, while `c360/init` worked and so
-did the browser. Same calls, cookies, JWT and `getJwe` answer as the browser; the only change that matters,
-measured one login at a time, is the User-Agent: Chrome 131 (sent without the `sec-ch-ua` client hints of a real
-Chrome) is refused, Firefox 160 is accepted. The client now sends the headers of a current Firefox
-(`api.user_agent`, `Sec-Fetch-*`, `Origin` only on POST); the version advances one step every 30 days, so it
-does not age.
+### Open logins and sign-out
+The account services (`contiServices`, `profilo-energetico-services`) answer `HTTP 401` with a generic
+`{"timestamp":…,"status":401,"error":"Unauthorized","path":…}` to the logins opened while too many are open on
+the account; `c360/init` keeps answering, and so do the logins opened before. Renewing the portal session
+(`getJWT` + `getJwe`) does not help: the refusal belongs to the Gigya login. Measured on 2026-11-22: after a day
+of tests without sign-out new logins were refused; they worked again about 50 minutes later (the Gigya sessions
+of the tests lasted 3000 s), and at once after closing an open login.
+
+Sign-out, as the web app does it:
+1. Gigya `accounts.logout` with the `login_token`;
+2. `POST serviceDAp/api/action/logout?logHash={hash}` with body `{"logHash": "{hash}", "codiceCliente": "{cliente}"}`
+   and the headers `Cache-Control: Clear-Site-Data` and `Isbeta: true`;
+3. the web app then deletes the cookies `JBFFSESSIONID`, `PORTAL_VERSION`, `X-CSRF-TOKEN`, `JSESSIONID`.
+
+The integration closes the login of the configuration at once, keeps one login (30 days) per entry, closes it
+when it is refused or when the entry is removed, and does not sign in with the password more than once every 15
+minutes.
+
+The client presents itself as a current Firefox (`api.user_agent`, `Sec-Fetch-*`, `Origin` only on POST). On
+2026-11-22 this looked like the fix, but it was a coincidence with the expiry of the logins of the tests.
 
 ## Sessions (measured on 2026-11-22)
 | Element | Lifetime | Renewal |

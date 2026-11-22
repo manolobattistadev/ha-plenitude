@@ -87,9 +87,14 @@ async def _electric_supplies(hass: HomeAssistant, email: str, password: str) -> 
     session = async_create_clientsession(hass, auto_cleanup=False, cookie_jar=aiohttp.CookieJar())
     try:
         client = PlenitudeClient(session)
-        await client.login(email, password)
-        account = await client.get_account()
-        supplies = await client.get_supplies(account)
+        account = None
+        try:
+            await client.login(email, password)
+            account = await client.get_account()
+            supplies = await client.get_supplies(account)
+        finally:
+            # Close the throw-away login: the integration opens its own one when the entry is set up.
+            await client.logout(account)
     finally:
         session.detach()  # the connector is shared with Home Assistant: detach, do not close
     return [s for s in supplies if s.pod and s.contract_id and s.house_id]
@@ -124,8 +129,8 @@ class PlenitudeConfigFlow(ConfigFlow, domain=DOMAIN):
             _LOGGER.warning("Plenitude %s: login refused by Plenitude: %s", INTEGRATION_VERSION, safe_error(err))
             return [], "invalid_auth"
         except PlenitudeSessionExpired as err:
-            # Login accepted, but the customer area refuses the data of the account (seen on 2026-11-22: HTTP 401
-            # from every service of the account right after a new login, while older sessions kept working).
+            # Login accepted, but the customer area refuses the data of the account: HTTP 401 from every service
+            # of the account when too many logins are open on it (2026-11-22). The login was closed anyway.
             _LOGGER.warning(
                 "Plenitude %s: login accepted, but the customer area refused the account data: %s",
                 INTEGRATION_VERSION,

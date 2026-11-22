@@ -4,6 +4,19 @@ All notable changes to this project are listed here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [semantic versioning](https://semver.org/).
 
+## [0.3.4] - 2026-11-22
+
+### Fixed
+- The real cause of *portal refused* (HTTP 401 from the account services after a new login): the customer area
+  refuses the data to new logins when too many are open on the account, and the integration never closed its
+  logins. Version 0.3.2 attributed it to the User-Agent: it was a coincidence, the logins of the tests had just
+  expired.
+- The configuration closes its login (Gigya and portal, as the web app does on sign-out) also when the portal
+  refuses the data.
+- When the portal refuses the data also after renewing the session, the integration closes its login and signs
+  in again on the next attempt, at most every 15 minutes, instead of keeping a refused login for 30 days.
+- Removing the integration closes its login and deletes the stored session.
+
 ## [0.3.3] - 2026-11-22
 
 ### Added

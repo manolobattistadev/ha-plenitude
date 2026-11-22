@@ -33,6 +33,7 @@ from pytest_homeassistant_custom_component.components.recorder.common import asy
 from custom_components.plenitude.api import CATEGORIES, ROME
 from custom_components.plenitude.bands import BANDS, PRICE_MODE, band, price_of
 from custom_components.plenitude.const import DOMAIN
+from custom_components.plenitude.coordinator import session_store
 
 pytestmark = pytest.mark.skipif(os.environ.get("PLENITUDE_LIVE") != "1", reason="live check: PLENITUDE_LIVE=1")
 
@@ -223,5 +224,8 @@ async def test_live(hass: HomeAssistant, network, plain_sessions) -> None:
     print(f"Seconda sincronizzazione: {len(requested)} giorni chiesti ({ranges(requested)})")
     check(len(requested) <= 20, "la seconda sincronizzazione ha chiesto troppi giorni")
 
-    check(await hass.config_entries.async_unload(entry.entry_id), "scaricamento non riuscito")
+    # Removal closes the 30-day login: otherwise every run would keep a place among the sessions of the account.
+    await hass.config_entries.async_remove(entry.entry_id)
     await hass.async_block_till_done()
+    check(await session_store(hass, entry.entry_id).async_load() is None, "sessione non cancellata alla rimozione")
+    print("Rimozione: login chiuso, sessione cancellata")

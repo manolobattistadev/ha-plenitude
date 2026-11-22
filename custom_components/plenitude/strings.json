@@ -34,7 +34,7 @@
       "no_supplies": "The account has no electricity supply with the consumption analysis.",
       "supply_missing": "The configured supply is no longer in this account.",
       "unknown": "Unexpected error: see the Home Assistant log.",
-      "portal_refused": "Plenitude accepted the login, but the customer area refuses the data of the account for now. Check that the customer area works in a browser, then try again later."
+      "portal_refused": "Plenitude accepted the login, but the customer area refuses the data of the account. It does so when too many sessions are open on the account, for example in browsers or apps that were not signed out: sign out there, or wait about an hour, then try again."
     },
     "abort": {
       "already_configured": "This supply is already configured.",
@@ -116,6 +116,9 @@
     },
     "communication_error": {
       "message": "Error communicating with Plenitude: {error}"
+    },
+    "portal_refused": {
+      "message": "The customer area refuses the data of the account (too many sessions open on the account?): signing in again in a few minutes"
     }
   },
   "config_subentries": {

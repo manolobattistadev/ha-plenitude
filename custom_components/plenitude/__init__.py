@@ -20,7 +20,7 @@ from homeassistant.helpers.update_coordinator import UpdateFailed
 from . import websocket
 from .api import PlenitudeError, safe_error
 from .const import CARDS_FILE, CARDS_URL, DOMAIN
-from .coordinator import PlenitudeConfigEntry, PlenitudeCoordinator, cost_items
+from .coordinator import PlenitudeConfigEntry, PlenitudeCoordinator, async_close_login, cost_items
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -99,3 +99,8 @@ def _reload_when_costs_change(hass: HomeAssistant, entry: PlenitudeConfigEntry) 
 
 async def async_unload_entry(hass: HomeAssistant, entry: PlenitudeConfigEntry) -> bool:
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: PlenitudeConfigEntry) -> None:
+    """Removed entry: close its login (it would keep a place among the sessions of the account for 30 days)."""
+    await async_close_login(hass, entry.entry_id)

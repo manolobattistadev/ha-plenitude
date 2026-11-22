@@ -244,6 +244,9 @@ To report a vulnerability, see [SECURITY.md](SECURITY.md).
 - **"Plenitude refused the login".** The password changed, or Plenitude asks for an additional verification. Sign
   in to the customer area with a browser, then open the request to sign in again in **Settings → Devices &
   services** and enter the password.
+- **"The customer area refuses the data of the account".** Too many sessions are open on the Plenitude
+  account, for example in browsers or apps that were not signed out. Sign out there, or wait about an hour; the
+  integration signs in again by itself, at most every 15 minutes.
 - **Some days are missing.** The customer area itself sometimes has no data for some days. The integration asks
   again for the missing days of the last two weeks, once a day.
 - **The cards do not appear** in *Add card*. Make sure the integration is loaded, then reload the page without

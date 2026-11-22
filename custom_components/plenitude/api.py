@@ -35,11 +35,11 @@ PORTAL_BASE = "https://eniplenitude.com"
 SERVICE_BASE = f"{PORTAL_BASE}/serviceDAp"
 PAGE_URL = f"{PORTAL_BASE}/my-eni"
 ROME = ZoneInfo("Europe/Rome")
-# Browser identity. Measured on 2026-11-22: with the User-Agent of Chrome 131 (sent without the client hints a
-# real Chrome adds) the account services answered HTTP 401 to new sessions; with the one of Firefox 160, every
-# other request unchanged, they answer. The client presents itself as the Firefox of that day and advances one
-# major version every 30 days: Firefox ships one about every four weeks, so the version stays close to the
-# current release without getting ahead of it.
+# Browser identity: the client presents itself as a current Firefox, coherent with the headers it sends (Firefox
+# has no client hints, Chrome has). It starts from the Firefox of 2026-11-22 and advances one major version every
+# 30 days: Firefox ships one about every four weeks, so the version stays close to the current release without
+# getting ahead of it. (On 2026-11-22 the change from Chrome 131 looked like the fix of the HTTP 401 of the account
+# services; the real cause was the number of open logins, see ``logout``.)
 FIREFOX_VERSION = 160
 FIREFOX_VERSION_DATE = date(2026, 11, 22)
 FIREFOX_DAYS_PER_VERSION = 30
@@ -429,6 +429,38 @@ class PlenitudeClient:
         if not self.has_portal_session():
             raise PlenitudeError("getJwe did not set the portal session cookies")
         return jwt_seconds
+
+    async def logout(self, account: Account | None = None) -> None:
+        """Close the sessions as the web app does when the user signs out: Gigya first, then the portal.
+
+        Best effort: errors are only written to the debug log. Without it every login stays open until it
+        expires, and the customer area appears to refuse new sessions when too many are open (2026-11-22).
+        The portal part needs the customer code (``account``).
+        """
+        if self.login_token:
+            try:
+                await self._gigya("accounts.logout", {"login_token": self.login_token})
+            except (PlenitudeError, aiohttp.ClientError, TimeoutError) as err:
+                _LOGGER.debug("Gigya logout failed: %s", safe_error(err))
+        if account is not None and self.has_portal_session():
+            log_hash = self._log_hash()
+            extra = {"Cache-Control": "Clear-Site-Data", "Isbeta": "true"}
+            try:
+                async with self._session.post(
+                    f"{SERVICE_BASE}/api/action/logout",
+                    params={"logHash": log_hash},
+                    json={"logHash": log_hash, "codiceCliente": account.client_code},
+                    headers=self._headers(SAME_ORIGIN, "POST", extra),
+                    allow_redirects=False,
+                ) as resp:
+                    _trace(resp)
+                    await resp.read()
+            except (aiohttp.ClientError, TimeoutError) as err:
+                _LOGGER.debug("Portal logout failed: %s", safe_error(err))
+        self.login_token = None
+        self.login_token_expires_at = None
+        self._last_jwt = None
+        self._session.cookie_jar.clear()
 
     # ---------------------------------------------------------------- persistence
 

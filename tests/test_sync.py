@@ -6,6 +6,7 @@ from datetime import UTC, date, datetime, time, timedelta
 from unittest.mock import patch
 
 import pytest
+from freezegun.api import FrozenDateTimeFactory
 from homeassistant.components.recorder import get_instance
 from homeassistant.components.recorder.statistics import get_metadata, statistics_during_period
 from homeassistant.config_entries import SOURCE_REAUTH, ConfigEntryState, ConfigSubentryData
@@ -16,7 +17,8 @@ from pytest_homeassistant_custom_component.components.recorder.common import asy
 
 from custom_components.plenitude.api import CATEGORIES, ROME, PlenitudeAuthError, PlenitudeSessionExpired
 from custom_components.plenitude.bands import BANDS, PRICE_MODE, band, price_of
-from custom_components.plenitude.const import CONF_SUPPLY, DOMAIN, statistic_prefix, supply_key
+from custom_components.plenitude.const import CONF_SUPPLY, DOMAIN, LOGIN_PAUSE, statistic_prefix, supply_key
+from custom_components.plenitude.coordinator import session_store
 
 from .conftest import KWH_PER_HOUR, POD, FakeClient, FakePortal, day_hours
 
@@ -342,3 +344,60 @@ async def test_costs_per_kwh_follow_the_subentries(
     hass.config_entries.async_remove_subentry(entry, subentry_id)
     await settle()
     assert (await rows(hass, COST))[-1]["sum"] == pytest.approx(energy[-1]["sum"] * 0.2)
+
+
+def new_entry(hass: HomeAssistant) -> MockConfigEntry:
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Plenitude luce",
+        unique_id=supply_key(POD),
+        data={"email": "test@example.com", "password": "x", CONF_SUPPLY: supply_key(POD)},
+        options={PRICE_MODE: "none"},
+    )
+    entry.add_to_hass(hass)
+    return entry
+
+
+async def test_refused_portal_closes_the_login(hass: HomeAssistant, fake_client: FakePortal) -> None:
+    """The portal refuses also after the renewal: the login is closed and the setup is retried later."""
+    with patch.object(FakeClient, "get_supplies", side_effect=PlenitudeSessionExpired("HTTP 401")):
+        entry = new_entry(hass)
+        await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+    assert entry.state is ConfigEntryState.SETUP_RETRY
+    assert entry.error_reason_translation_key == "portal_refused"
+    assert (fake_client.logins, fake_client.logouts) == (0, 1)  # renewed without the password, then closed
+
+
+async def test_logins_are_spaced_while_the_portal_refuses(
+    hass: HomeAssistant, fake_client: FakePortal, freezer: FrozenDateTimeFactory
+) -> None:
+    """While the portal refuses, a new login with the password at most every LOGIN_PAUSE."""
+    with (
+        patch.object(FakeClient, "open_portal_session", side_effect=PlenitudeSessionExpired("Gigya session over")),
+        patch.object(FakeClient, "get_supplies", side_effect=PlenitudeSessionExpired("HTTP 401")),
+    ):
+        entry = new_entry(hass)
+        await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+        assert fake_client.logins == 1
+        freezer.tick(LOGIN_PAUSE - timedelta(minutes=1))
+        await hass.config_entries.async_reload(entry.entry_id)
+        await hass.async_block_till_done()
+        assert fake_client.logins == 1  # too early: no new login
+        assert entry.error_reason_translation_key == "portal_refused"
+        freezer.tick(timedelta(minutes=2))
+        await hass.config_entries.async_reload(entry.entry_id)
+        await hass.async_block_till_done()
+    assert fake_client.logins == 2
+    assert entry.state is ConfigEntryState.SETUP_RETRY
+
+
+async def test_removal_closes_the_login(hass: HomeAssistant, fake_client: FakePortal) -> None:
+    entry = await setup(hass, {PRICE_MODE: "none"})
+    await session_store(hass, entry.entry_id).async_save({"session": {"login_token": "fake", "cookies": []}})
+    logouts = fake_client.logouts
+    await hass.config_entries.async_remove(entry.entry_id)
+    await hass.async_block_till_done()
+    assert fake_client.logouts == logouts + 1
+    assert await session_store(hass, entry.entry_id).async_load() is None

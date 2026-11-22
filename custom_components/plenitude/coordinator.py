@@ -58,6 +58,7 @@ from .const import (
     DOMAIN,
     HISTORY_EMPTY_RUN,
     HISTORY_MAX_DAYS,
+    LOGIN_PAUSE,
     RECHECK_DAYS,
     REQUEST_PAUSE,
     SESSION_EXPIRATION,
@@ -107,6 +108,33 @@ def _local_day(moment: datetime) -> date:
     return moment.astimezone(ROME).date()
 
 
+def session_store(hass: HomeAssistant, entry_id: str) -> Store[dict[str, Any]]:
+    """Session and import state of one entry. Tokens and cookies are secrets: readable by the owner only."""
+    return Store(hass, STORAGE_VERSION, f"{DOMAIN}.{entry_id}", private=True)
+
+
+async def async_close_login(hass: HomeAssistant, entry_id: str) -> None:
+    """Close the login of a removed entry and delete its storage.
+
+    An open login keeps a place among the sessions of the account for 30 days. Best effort: without network
+    the storage is deleted anyway.
+    """
+    store = session_store(hass, entry_id)
+    state = await store.async_load() or {}
+    if (state.get("session") or {}).get("login_token"):
+        session = async_create_clientsession(hass, auto_cleanup=False, cookie_jar=aiohttp.CookieJar())
+        try:
+            client = PlenitudeClient(session)
+            client.import_state(state["session"])
+            async with asyncio.timeout(30):
+                await client.logout()
+        except (TimeoutError, aiohttp.ClientError, PlenitudeError) as err:
+            _LOGGER.debug("Logout of the removed entry failed: %s", safe_error(err))
+        finally:
+            session.detach()  # the connector is shared with Home Assistant
+    await store.async_remove()
+
+
 class PlenitudeCoordinator(DataUpdateCoordinator[PlenitudeData]):
     """One supply of one Plenitude account."""
 
@@ -116,8 +144,7 @@ class PlenitudeCoordinator(DataUpdateCoordinator[PlenitudeData]):
         super().__init__(hass, _LOGGER, config_entry=entry, name=DOMAIN, update_interval=UPDATE_INTERVAL)
         # A session of its own: the portal session lives in its cookies.
         self.client = PlenitudeClient(async_create_clientsession(hass, cookie_jar=aiohttp.CookieJar()))
-        # Tokens and cookies are secrets: the file is written readable by the owner only.
-        self._store: Store[dict[str, Any]] = Store(hass, STORAGE_VERSION, f"{DOMAIN}.{entry.entry_id}", private=True)
+        self._store = session_store(hass, entry.entry_id)
         self._state: dict[str, Any] = {}
         self._account: Account | None = None
         self.supply: Supply | None = None
@@ -224,8 +251,15 @@ class PlenitudeCoordinator(DataUpdateCoordinator[PlenitudeData]):
                 await self.client.open_portal_session()
                 _LOGGER.debug("Portal session renewed without the password")
             except PlenitudeSessionExpired:
+                last = self._state.get("login_at")
+                if last and dt_util.utcnow() - datetime.fromisoformat(last) < LOGIN_PAUSE:
+                    raise UpdateFailed(translation_domain=DOMAIN, translation_key="portal_refused") from None
+                await self.client.logout()  # what is left of the old login, if Gigya still has it
                 data = self.config_entry.data
                 await self.client.login(data[CONF_EMAIL], data[CONF_PASSWORD], SESSION_EXPIRATION)
+                # Only a login accepted by Gigya opens a session: after a refused password (re-authentication)
+                # the next login can start at once.
+                self._state["login_at"] = dt_util.utcnow().isoformat()
                 _LOGGER.debug("New login with the password")
         except PlenitudeAuthError as err:
             # Gigya codes 401xxx and 403xxx: credentials refused, CAPTCHA, locked account. Asking the user is
@@ -241,19 +275,30 @@ class PlenitudeCoordinator(DataUpdateCoordinator[PlenitudeData]):
         await self._save()
 
     async def _call[T](self, request: Callable[[], Awaitable[T]]) -> T:
-        """Run a request; if the session is over, renew it once and try again."""
+        """Run a request; if the session is over, renew it once and try again.
+
+        If the portal still refuses, the login itself is refused: the customer area does so with the logins
+        opened while too many were open on the account, and renewing the portal session does not help. The
+        login is closed, so that the next attempt (after ``LOGIN_PAUSE``) signs in again.
+        """
         try:
             return await request()
         except PlenitudeSessionExpired:
             await self._renew()
+        try:
             return await request()
+        except PlenitudeSessionExpired as err:
+            _LOGGER.debug("Portal refused after the renewal (%s): closing the login", safe_error(err))
+            await self.client.logout(self._account)
+            await self._save()
+            raise UpdateFailed(translation_domain=DOMAIN, translation_key="portal_refused") from err
 
     async def _ensure_supply(self) -> None:
         if self.supply is not None:
             return
         if not self.client.has_portal_session():
             await self._renew()
-        account = await self._call(self.client.get_account)
+        account = self._account = await self._call(self.client.get_account)
         supplies = await self._call(lambda: self.client.get_supplies(account))
         wanted = self.config_entry.data[CONF_SUPPLY]
         for supply in supplies:

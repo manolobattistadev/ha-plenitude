@@ -244,6 +244,9 @@ Per segnalare una vulnerabilità vedi [SECURITY.md](SECURITY.md).
 - **"Plenitude ha rifiutato il login".** La password è cambiata, o Plenitude chiede una verifica aggiuntiva.
   Accedi all'area clienti con un browser, poi apri la richiesta di nuovo accesso in **Impostazioni → Dispositivi
   e servizi** e inserisci la password.
+- **"L'area clienti rifiuta i dati del conto".** Sul conto Plenitude sono aperte troppe sessioni, per esempio in
+  browser o app da cui non si è usciti. Esci da lì, oppure aspetta circa un'ora; l'integrazione rifà il login da
+  sola, al massimo ogni 15 minuti.
 - **Mancano alcuni giorni.** A volte l'area clienti stessa non ha i dati di alcuni giorni. L'integrazione chiede
   di nuovo i giorni mancanti delle ultime due settimane, una volta al giorno.
 - **Le card non compaiono** in *Aggiungi card*. Controlla che l'integrazione sia caricata, poi ricarica la pagina
