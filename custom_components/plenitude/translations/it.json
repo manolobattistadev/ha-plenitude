@@ -1,0 +1,84 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Area clienti Eni Plenitude",
+        "description": "Le stesse credenziali con cui entri in eniplenitude.com/my-eni. La password serve solo quando la sessione (30 giorni) scade.",
+        "data": {
+          "email": "Email",
+          "password": "Password"
+        }
+      },
+      "supply": {
+        "title": "Fornitura",
+        "description": "Nell'account ci sono più forniture luce: scegli quella da importare. Per le altre aggiungi di nuovo l'integrazione.",
+        "data": {
+          "supply": "Fornitura"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Accedi di nuovo a Plenitude",
+        "description": "Plenitude ha rifiutato il login per {email}: inserisci di nuovo la password.",
+        "data": {
+          "password": "Password"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Credenziali rifiutate da Plenitude (o richiesta una verifica aggiuntiva).",
+      "cannot_connect": "Impossibile contattare l'area clienti Plenitude.",
+      "no_supplies": "Nell'account non c'è una fornitura luce con l'analisi dei consumi.",
+      "supply_missing": "La fornitura configurata non è più in questo account.",
+      "unknown": "Errore inatteso: vedi il log di Home Assistant."
+    },
+    "abort": {
+      "already_configured": "Questa fornitura è già configurata.",
+      "reauth_successful": "Accesso rinnovato."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Prezzo dell'energia",
+        "description": "Plenitude non espone il prezzo dell'offerta: indicalo tu per avere anche il costo. Se lo cambi, il costo di tutto lo storico viene ricalcolato con il nuovo prezzo.",
+        "data": {
+          "price_mode": "Tipo di prezzo"
+        }
+      },
+      "prices": {
+        "title": "Prezzi per kWh",
+        "description": "Prezzi in euro per kWh. Per un costo vicino a quello reale usa un prezzo tutto compreso (totale di una bolletta diviso i kWh fatturati); il solo prezzo dell'energia dell'offerta dà un costo più basso.",
+        "data": {
+          "price": "Prezzo unico",
+          "price_f1": "Fascia F1",
+          "price_f2": "Fascia F2",
+          "price_f3": "Fascia F3",
+          "price_f23": "Fascia F23 (F2 + F3)"
+        }
+      }
+    }
+  },
+  "selector": {
+    "price_mode": {
+      "options": {
+        "none": "Nessun prezzo (solo consumi)",
+        "single": "Prezzo unico (monoraria)",
+        "two": "Due fasce: F1 e F23 (bioraria)",
+        "three": "Tre fasce: F1, F2, F3 (multioraria)"
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "ultimo_giorno": {
+        "name": "Ultimo giorno disponibile"
+      },
+      "consumo_ultimo_giorno": {
+        "name": "Consumo dell'ultimo giorno"
+      },
+      "costo_ultimo_giorno": {
+        "name": "Costo dell'ultimo giorno"
+      }
+    }
+  }
+}

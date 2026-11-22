@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import base64
 import json
+import re
 import secrets
 import string
 from dataclasses import dataclass
@@ -45,6 +46,19 @@ VIEW_DAY = "0"  # FIFTEEN_DAILY: 24 hourly values in "data", 96 quarter-hours in
 VIEW_WEEK = "1"  # WEEKLY: one value per day
 VIEW_MONTH = "2"  # MONTHLY: one value per day
 VIEW_YEAR = "3"  # YEARLY: one value per month
+
+# activityId of the estimated breakdown (Midori). 0 is "Energia attiva", the measured total.
+TOTAL_ACTIVITY = 0
+CATEGORIES: dict[int, str] = {
+    1: "refrigerare",
+    2: "standby",
+    3: "lavare",
+    4: "cucinare",
+    5: "comfort_ambientale",
+    6: "elettronica_luci",
+    7: "altro",
+    8: "ricarica_elettrica",
+}
 
 
 class PlenitudeError(Exception):
@@ -84,6 +98,7 @@ class Supply:
     pdr: str | None
     contract_id: str | None = None
     house_id: str | None = None
+    address: str | None = None
 
 
 @dataclass
@@ -109,12 +124,32 @@ class DayConsumption:
     server_timestamps_ok: bool = True
 
 
+@dataclass
+class MonthConsumption:
+    """Daily consumption of one month per activity (``MONTHLY`` view).
+
+    ``days`` maps a category key (``CATEGORIES`` values, or ``"totale"``) to ``{day: kWh}``; days without a
+    value are missing. ``names`` are the labels the portal shows for each key.
+    """
+
+    year: int
+    month: int
+    status: str | None
+    days: dict[str, dict[date, float]]
+    names: dict[str, str]
+
+
 def token_lifetime(jwt: str) -> int:
     """Lifetime in seconds of a JWT (``exp - iat``), read without verifying the signature."""
     payload = jwt.split(".")[1]
     payload += "=" * (-len(payload) % 4)
     claims = json.loads(base64.urlsafe_b64decode(payload))
     return int(claims["exp"]) - int(claims["iat"])
+
+
+def safe_path(path: str) -> str:
+    """Path for error messages and logs: account and customer codes (5+ digits) are masked."""
+    return re.sub(r"\d{5,}", "…", path)
 
 
 def _utc_iso(moment: datetime) -> str:
@@ -129,6 +164,28 @@ def day_period(day: date) -> dict[str, str]:
     """
     next_midnight = datetime.combine(day + timedelta(days=1), time.min, ROME)
     return {"startTime": _utc_iso(next_midnight), "endTime": f"{day.isoformat()}T00:00:00.000Z"}
+
+
+def month_period(year: int, month: int) -> dict[str, str]:
+    """``startTime``/``endTime`` for one month, built as the web app does.
+
+    The web app sends local midnight of day 2 converted to UTC (for November: ``2026-11-01T23:00:00.000Z``)
+    and the last day of the month at 23:00Z.
+    """
+    start = datetime.combine(date(year, month, 2), time.min, ROME)
+    last = date(year + month // 12, month % 12 + 1, 1) - timedelta(days=1)
+    return {"startTime": _utc_iso(start), "endTime": f"{last.isoformat()}T23:00:00.000Z"}
+
+
+def _day_label(name: Any, year: int, month: int) -> date | None:
+    """Day of a ``dd/mm`` label of the monthly view, or ``None`` if it does not belong to the month."""
+    try:
+        day_text, month_text = str(name).split("/")
+        if int(month_text) != month:
+            return None
+        return date(year, month, int(day_text))
+    except ValueError:
+        return None
 
 
 def _sequence(items: list[dict[str, Any]] | None, day: date, step: timedelta) -> tuple[list[Reading], bool]:
@@ -219,12 +276,16 @@ class PlenitudeClient:
         ) as resp:
             # 406 is what the portal answers after about an hour of inactivity (measured 2026-11-22).
             if resp.status in (301, 302, 303, 307, 308, 401, 403, 406):
-                raise PlenitudeSessionExpired(f"{path}: HTTP {resp.status}")
+                raise PlenitudeSessionExpired(f"{safe_path(path)}: HTTP {resp.status}")
             if resp.status == 204:
                 return None
-            resp.raise_for_status()
+            if resp.status >= 400:
+                # Not raise_for_status(): its message would contain the full URL with the codes.
+                raise PlenitudeError(f"{safe_path(path)}: HTTP {resp.status}")
             if "json" not in resp.headers.get("Content-Type", ""):
-                raise PlenitudeSessionExpired(f"{path}: answer is {resp.headers.get('Content-Type')}, not JSON")
+                raise PlenitudeSessionExpired(
+                    f"{safe_path(path)}: answer is {resp.headers.get('Content-Type')}, not JSON"
+                )
             return await resp.json()
 
     def has_portal_session(self) -> bool:
@@ -334,7 +395,12 @@ class PlenitudeClient:
         """Supplies of the account, with the ``contractId``/``houseId`` needed by the consumption API."""
         data = await self._service("GET", f"/api/contiServices/conti/{account.account_code}/lista-forniture")
         supplies = [
-            Supply(kind=str(item.get("tipo")), pod=item.get("pod") or None, pdr=item.get("pdr") or None)
+            Supply(
+                kind=str(item.get("tipo")),
+                pod=item.get("pod") or None,
+                pdr=item.get("pdr") or None,
+                address=item.get("indirizzoFornitura") or None,
+            )
             for item in (data or {}).get("fornitura", [])
         ]
         for supply in supplies:
@@ -377,6 +443,41 @@ class PlenitudeClient:
             quarter_hours=quarters,
             server_timestamps_ok=hours_ok and quarters_ok,
         )
+
+    async def get_month(self, account: Account, supply: Supply, year: int, month: int) -> MonthConsumption:
+        """Daily totals of one month, measured and per estimated category (``MONTHLY`` view).
+
+        The categories exist only at this granularity: in the day view each one has a single value.
+        """
+        if not supply.contract_id or not supply.house_id:
+            raise PlenitudeError("supply without contractId/houseId: consumption analysis not available")
+        body = {
+            "clientCode": account.client_code,
+            "contractId": supply.contract_id,
+            "houseId": supply.house_id,
+            **month_period(year, month),
+            "type": VIEW_MONTH,
+        }
+        data = await self._service(
+            "POST", f"/api/profilo-energetico-services/{account.account_code}/analysis/consumptions", body=body
+        )
+        days: dict[str, dict[date, float]] = {}
+        names: dict[str, str] = {}
+        for item in (data or {}).get("consumptionList") or []:
+            activity = item.get("activityId")
+            if activity == TOTAL_ACTIVITY:
+                key = "totale"
+            elif activity in CATEGORIES:
+                key = CATEGORIES[activity]
+            else:
+                key = f"categoria_{activity}"
+            names[key] = str(item.get("activityName") or key)
+            values = days.setdefault(key, {})
+            for entry in item.get("data") or []:
+                day = _day_label(entry.get("name"), year, month)
+                if day is not None and entry.get("consumption") is not None:
+                    values[day] = float(entry["consumption"])
+        return MonthConsumption(year=year, month=month, status=(data or {}).get("status"), days=days, names=names)
 
     async def get_monthly_by_band(self, account: Account) -> list[dict[str, Any]]:
         """Monthly consumption per time band F1/F2/F3 (kWh, billing data), raw as returned."""

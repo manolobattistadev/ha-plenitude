@@ -1,0 +1,2 @@
+# Home Assistant test kit: it pins the Home Assistant version the tests run against.
+pytest-homeassistant-custom-component

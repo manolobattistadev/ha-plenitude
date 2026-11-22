@@ -1,0 +1,84 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Eni Plenitude customer area",
+        "description": "The credentials you use on eniplenitude.com/my-eni. The password is used only when the session (30 days) expires.",
+        "data": {
+          "email": "Email",
+          "password": "Password"
+        }
+      },
+      "supply": {
+        "title": "Supply",
+        "description": "The account has more than one electricity supply: choose the one to import. Add the integration again for the others.",
+        "data": {
+          "supply": "Supply"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Sign in to Plenitude again",
+        "description": "Plenitude refused the login for {email}: enter the password again.",
+        "data": {
+          "password": "Password"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Credentials refused by Plenitude (or an additional verification is required).",
+      "cannot_connect": "Cannot reach the Plenitude customer area.",
+      "no_supplies": "The account has no electricity supply with the consumption analysis.",
+      "supply_missing": "The configured supply is no longer in this account.",
+      "unknown": "Unexpected error: see the Home Assistant log."
+    },
+    "abort": {
+      "already_configured": "This supply is already configured.",
+      "reauth_successful": "Sign-in renewed."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Energy price",
+        "description": "Plenitude does not expose the price of the offer: enter it to get the cost too. If you change it, the cost of the whole history is recomputed with the new price.",
+        "data": {
+          "price_mode": "Price type"
+        }
+      },
+      "prices": {
+        "title": "Prices per kWh",
+        "description": "Prices in euro per kWh. For a cost close to the real one use an all-inclusive price (total of a bill divided by the billed kWh); the energy price of the offer alone gives a lower cost.",
+        "data": {
+          "price": "Single price",
+          "price_f1": "Band F1",
+          "price_f2": "Band F2",
+          "price_f3": "Band F3",
+          "price_f23": "Band F23 (F2 + F3)"
+        }
+      }
+    }
+  },
+  "selector": {
+    "price_mode": {
+      "options": {
+        "none": "No price (consumption only)",
+        "single": "Single price",
+        "two": "Two bands: F1 and F23",
+        "three": "Three bands: F1, F2, F3"
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "ultimo_giorno": {
+        "name": "Last day available"
+      },
+      "consumo_ultimo_giorno": {
+        "name": "Consumption of the last day"
+      },
+      "costo_ultimo_giorno": {
+        "name": "Cost of the last day"
+      }
+    }
+  }
+}
