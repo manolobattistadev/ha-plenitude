@@ -66,8 +66,9 @@ Un'integrazione di Home Assistant che porta in Home Assistant i consumi di luce 
 3. Se nell'account ci sono più forniture luce, scegli quella da importare. Per importarne un'altra, aggiungi di
    nuovo l'integrazione.
 
-Il primo import parte subito, in background: legge lo storico un giorno alla volta, all'indietro da ieri, finché
-trova un mese senza dati (al massimo tre anni). Ci vuole qualche minuto.
+Il primo import parte subito, in background: legge lo storico all'indietro da ieri, tre giorni alla volta, finché
+trova un mese senza dati (al massimo tre anni). Le ultime due settimane compaiono in pochi secondi; il resto dello
+storico arriva in qualche minuto (circa 6 minuti per tre anni).
 
 ### Prezzi e costi
 Plenitude non espone il prezzo della tua offerta, quindi il costo si calcola dai prezzi e dai costi che inserisci.
@@ -83,9 +84,11 @@ Plenitude non espone il prezzo della tua offerta, quindi il costo si calcola dai
 
 **Altri costi.** Nella stessa pagina scegli **Aggiungi costo**, tutte le volte che serve. Ogni costo ha:
 - **Nome**: un testo libero, per esempio canone RAI, quota fissa, quota potenza, oneri di sistema;
-- **Tipologia**: mensile, bimestrale, annuale o per kWh;
-- **Importo**: in euro (euro per kWh per i costi per kWh), al massimo 6 decimali. Per uno sconto usa un importo
-  negativo.
+- **Tipologia**: mensile, bimestrale, annuale, €/kW al mese o per kWh;
+- **Importo**: in euro (euro per kWh per i costi per kWh, euro per kW per i costi in €/kW al mese), al massimo 6
+  decimali. Per uno sconto usa un importo negativo.
+- **Potenza**, solo per i costi in €/kW al mese (la quota potenza della bolletta): la potenza del contratto in kW,
+  come in bolletta (potenza impegnata). Se l'area clienti la indica, è già proposta.
 
 I costi sono elencati sotto l'integrazione, dove puoi modificarli o eliminarli.
 
@@ -93,14 +96,15 @@ Come vengono contati:
 - I costi **per kWh** si aggiungono al prezzo di ogni ora: sono nella statistica del costo, nella dashboard
   Energia, nel sensore e nelle card. Quando cambiano i prezzi o i costi per kWh, il costo di tutto lo storico
   viene ricalcolato.
-- I costi **mensili, bimestrali e annuali** non dipendono dalle ore, quindi **non** sono nella statistica del costo
-  né nella dashboard Energia. Le card li ripartiscono sui giorni: `importo × volte all'anno / giorni dell'anno`
-  (12 volte per i mensili, 6 per i bimestrali, una per gli annuali), dal primo all'ultimo giorno con dati. La card
-  della bolletta in corso elenca ogni costo.
+- I costi **mensili, bimestrali, annuali e in €/kW al mese** non dipendono dalle ore, quindi **non** sono nella
+  statistica del costo né nella dashboard Energia. Le card li ripartiscono sui giorni: `euro all'anno / giorni
+  dell'anno`, dove gli euro all'anno sono l'importo × 12 per i mensili, × 6 per i bimestrali, × 1 per gli annuali e
+  × potenza × 12 per i costi in €/kW al mese, dal primo all'ultimo giorno con dati. La card della bolletta in corso
+  elenca ogni costo.
 
 **Avvicinarsi alla bolletta.** Come prezzo usa quello dell'energia della tua offerta, poi aggiungi come costi le
-altre voci di una bolletta: trasporto, oneri di sistema e accise per kWh; quota fissa, quota potenza e canone RAI
-come costi periodici. Includi l'IVA in ogni importo.
+altre voci di una bolletta: trasporto, oneri di sistema e accise per kWh; quota fissa e canone RAI come costi
+periodici; la quota potenza come costo in €/kW al mese. Includi l'IVA in ogni importo.
 
 ## Cosa ottieni
 
@@ -147,6 +151,11 @@ L'integrazione porta con sé due card e le carica da sola in ogni dashboard: non
 risorse. In una dashboard scegli **Modifica → Aggiungi card**, cerca **Plenitude** e configurale dall'editor
 visuale. Le card seguono la lingua del tuo profilo utente (italiano o inglese) e il tema chiaro o scuro.
 
+Le statistiche cambiano una volta al giorno, quando arrivano i giorni nuovi. Fino ad allora le card tengono quello
+che hanno letto: in memoria per tutte le card della pagina e nella memoria del browser quando la pagina si ricarica
+(pochi kB per periodo, al massimo 40 periodi). Tornare a una dashboard, o cambiare vista o unità su una card, non
+rilegge le statistiche; i dati nuovi compaiono entro circa 5 minuti dal loro import.
+
 ### Consumi
 Un grafico a colonne. Nelle impostazioni scegli periodo, vista e unità di partenza. Sulla card puoi cambiarli,
 spostarti avanti e indietro e tornare agli ultimi dati. Passa sopra o tocca una colonna per vederne i valori;
@@ -160,7 +169,8 @@ unit: kwh          # kwh | eur
 ```
 
 - Le **categorie** sono stime giornaliere: non ci sono nella vista del giorno e solo in kWh.
-- **In euro**, i costi mensili, bimestrali e annuali sono il segmento grigio alla base delle colonne.
+- **In euro**, i costi periodici (mensili, bimestrali, annuali, €/kW al mese) sono il segmento grigio alla base
+  delle colonne.
 
 ### Bolletta in corso
 Consumo e costo dall'inizio del periodo di fatturazione in corso all'ultimo giorno con dati. Mostra anche:
@@ -209,9 +219,13 @@ Italiano e inglese; ogni altra lingua usa l'inglese.
 
 | Cosa | Segue |
 |---|---|
-| Configurazione, opzioni, nomi delle entità, errori | la lingua di ciascun utente |
+| Configurazione, opzioni, costi, errori nei form, stati (*sconosciuto*), formato dei numeri | la lingua del profilo di ciascun utente |
 | Card | la lingua del profilo di ciascun utente |
+| Nomi delle entità | la lingua del server |
 | Nomi delle statistiche, titolo della voce, modello del dispositivo | la lingua del server quando vengono creati |
+
+Se alcuni testi sono in italiano e altri in inglese, la lingua del server (**Impostazioni → Sistema → Generale**) e
+quella del tuo profilo (il tuo nome in fondo alla barra laterale → **Lingua**) sono diverse: impostale entrambe.
 
 ## Privacy e sicurezza
 - **Credenziali.** Email e password restano nella voce di configurazione, come per ogni integrazione che accede a
@@ -250,6 +264,8 @@ Per segnalare una vulnerabilità vedi [SECURITY.md](SECURITY.md).
   Una volta configurata, l'integrazione rifà il login da sola, al massimo ogni 15 minuti.
 - **Mancano alcuni giorni.** A volte l'area clienti stessa non ha i dati di alcuni giorni. L'integrazione chiede
   di nuovo i giorni mancanti delle ultime due settimane, una volta al giorno.
+- **Dopo la prima configurazione i sensori restano *sconosciuto*.** Il primo import è ancora in corso: le ultime
+  due settimane compaiono in pochi secondi, il resto in qualche minuto (nel log: *Plenitude: first import, …*).
 - **Le card non compaiono** in *Aggiungi card*. Controlla che l'integrazione sia caricata, poi ricarica la pagina
   senza cache (o svuota la cache dell'app). Non aggiungere le card alle risorse della dashboard: le carica
   l'integrazione.

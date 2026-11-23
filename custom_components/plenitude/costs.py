@@ -3,8 +3,9 @@
 Each cost is a configuration subentry of type ``cost`` with a free name, a kind and an amount in euro (at most
 six decimals). Costs per kWh depend on the consumption: they are added to the price of every hour, so they are in
 the cost statistic and in the Energy dashboard. Monthly, two-monthly and yearly costs do not depend on the hours:
-they stay out of the statistic, and the cards spread them over the days (amount x periods per year / days of the
-year).
+they stay out of the statistic, and the cards spread them over the days (euro per year / days of the year). Costs
+per kW per month (the power fee of the bill) are monthly costs of ``amount x power``, with the power of the
+contract in kW.
 
 Like ``api`` and ``bands``, this module does not import Home Assistant.
 """
@@ -22,14 +23,16 @@ COST_SUBENTRY = "cost"
 COST_NAME = "name"
 COST_KIND = "kind"
 COST_AMOUNT = "amount"
+COST_POWER = "power"
 
 KIND_MONTHLY = "monthly"
 KIND_BIMONTHLY = "bimonthly"
 KIND_YEARLY = "yearly"
+KIND_PER_KW_MONTHLY = "per_kw_monthly"
 KIND_PER_KWH = "per_kwh"
-COST_KINDS = (KIND_MONTHLY, KIND_BIMONTHLY, KIND_YEARLY, KIND_PER_KWH)
+COST_KINDS = (KIND_MONTHLY, KIND_BIMONTHLY, KIND_YEARLY, KIND_PER_KW_MONTHLY, KIND_PER_KWH)
 # Periodic kinds: how many times a year they are charged.
-PERIODS_PER_YEAR = {KIND_MONTHLY: 12, KIND_BIMONTHLY: 6, KIND_YEARLY: 1}
+PERIODS_PER_YEAR = {KIND_MONTHLY: 12, KIND_BIMONTHLY: 6, KIND_YEARLY: 1, KIND_PER_KW_MONTHLY: 12}
 
 AMOUNT_DECIMALS = 6
 
@@ -39,13 +42,32 @@ class CostItem:
     name: str
     kind: str
     amount: float
+    power: float | None = None  # kW, only for the costs per kW per month
 
     @classmethod
     def from_data(cls, data: Mapping[str, Any]) -> CostItem:
-        return cls(name=str(data[COST_NAME]), kind=str(data[COST_KIND]), amount=float(data[COST_AMOUNT]))
+        power = data.get(COST_POWER)
+        return cls(
+            name=str(data[COST_NAME]),
+            kind=str(data[COST_KIND]),
+            amount=float(data[COST_AMOUNT]),
+            power=float(power) if power is not None and data[COST_KIND] == KIND_PER_KW_MONTHLY else None,
+        )
 
     def as_dict(self) -> dict[str, Any]:
-        return {COST_NAME: self.name, COST_KIND: self.kind, COST_AMOUNT: self.amount}
+        data: dict[str, Any] = {COST_NAME: self.name, COST_KIND: self.kind, COST_AMOUNT: self.amount}
+        if self.kind == KIND_PER_KW_MONTHLY:
+            data[COST_POWER] = self.power
+        return data
+
+    @property
+    def yearly(self) -> float | None:
+        """Euro per year of a periodic cost; None for the costs per kWh, which follow the consumption."""
+        times = PERIODS_PER_YEAR.get(self.kind)
+        if times is None:
+            return None
+        factor = (self.power or 0.0) if self.kind == KIND_PER_KW_MONTHLY else 1.0
+        return self.amount * factor * times
 
 
 def has_valid_decimals(amount: float) -> bool:

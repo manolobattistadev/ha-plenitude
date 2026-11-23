@@ -6,10 +6,14 @@
  *   custom:plenitude-billing-card      current billing period (two months from a chosen day): kWh and cost
  *                                      so far, bands, estimate at the end of the period
  *
- * Costs: the cost statistic is kWh x (price of the band + costs per kWh). The monthly, two-monthly and yearly
- * costs entered in the integration are spread by the cards over the days (amount x times a year / days of the
- * year), from the first to the last day with data.
+ * Costs: the cost statistic is kWh x (price of the band + costs per kWh). The periodic costs entered in the
+ * integration (monthly, two-monthly, yearly, per kW per month) are spread by the cards over the days (euro per
+ * year / days of the year), from the first to the last day with data.
  * Texts in Italian and English, following the language of the user's profile.
+ *
+ * The statistics change about once a day, when the integration imports new days: what the cards read is kept
+ * until the integration's data version changes (plenitude/info), in memory for all the cards of the page (Home
+ * Assistant re-creates the cards on every reconnection) and in the browser's localStorage (reloads of the page).
  *
  * Served by the integration (custom_components/plenitude) and loaded by the frontend on every dashboard.
  * Values come from the long-term statistics (recorder/statistics_during_period); the integration's
@@ -17,7 +21,7 @@
  * and hand-drawn SVG. Text that comes from outside (category names) is always set with textContent.
  */
 
-const CARD_VERSION = "0.3.6";
+const CARD_VERSION = "0.4.0";
 
 // ------------------------------------------------------------------------------------------- language
 
@@ -32,6 +36,8 @@ const STRINGS = {
     period: "Periodo di default",
     view: "Vista di default",
     unit: "Unità di default",
+    view_label: "Vista",
+    unit_label: "Unità",
     start_date: "Primo giorno di un periodo di fatturazione",
     months: "Durata del periodo",
     day: "Giorno",
@@ -69,7 +75,7 @@ const STRINGS = {
     estimate_note: "media dei giorni con dati × durata del periodo",
     choose_start: "Scegli nelle impostazioni della card il primo giorno di un periodo di fatturazione.",
     cost_note:
-      "Il costo è kWh × (prezzo della fascia + costi per kWh), più i costi mensili, bimestrali e annuali ripartiti per giorno, come impostati nell'integrazione. È una stima: la bolletta può contenere anche conguagli e letture stimate.",
+      "Il costo è kWh × (prezzo della fascia + costi per kWh), più i costi periodici (mensili, bimestrali, annuali, €/kW al mese) ripartiti per giorno, come impostati nell'integrazione. È una stima: la bolletta può contenere anche conguagli e letture stimate.",
     future: "periodo futuro",
     period_total: "Totale del periodo",
     when: "Quando",
@@ -81,6 +87,7 @@ const STRINGS = {
     kind_monthly: "mensile",
     kind_bimonthly: "bimestrale",
     kind_yearly: "annuale",
+    kind_per_kw_monthly: "€/kW al mese",
     kind_per_kwh: "per kWh",
     cat_comfort_ambientale: "Comfort ambientale (HVAC)",
     cat_standby: "Standby",
@@ -101,6 +108,8 @@ const STRINGS = {
     period: "Default period",
     view: "Default view",
     unit: "Default unit",
+    view_label: "View",
+    unit_label: "Unit",
     start_date: "First day of a billing period",
     months: "Length of the period",
     day: "Day",
@@ -138,7 +147,7 @@ const STRINGS = {
     estimate_note: "average of the days with data × length of the period",
     choose_start: "Choose the first day of a billing period in the card settings.",
     cost_note:
-      "The cost is kWh × (price of the band + costs per kWh), plus the monthly, two-monthly and yearly costs spread over the days, as set in the integration. It is an estimate: the bill may also contain adjustments and estimated readings.",
+      "The cost is kWh × (price of the band + costs per kWh), plus the periodic costs (monthly, two-monthly, yearly, per kW per month) spread over the days, as set in the integration. It is an estimate: the bill may also contain adjustments and estimated readings.",
     future: "future period",
     period_total: "Period total",
     when: "When",
@@ -150,6 +159,7 @@ const STRINGS = {
     kind_monthly: "monthly",
     kind_bimonthly: "every two months",
     kind_yearly: "yearly",
+    kind_per_kw_monthly: "per kW per month",
     kind_per_kwh: "per kWh",
     cat_comfort_ambientale: "Heating and cooling (HVAC)",
     cat_standby: "Standby",
@@ -162,7 +172,20 @@ const STRINGS = {
   },
 };
 
-const pageLang = () => ((document.documentElement.lang || navigator.language || "en").startsWith("it") ? "it" : "en");
+/** Language of the user's profile where there is no ``hass`` (card picker, editor): the frontend's own, then the
+ * page's (set by the frontend once its translations are loaded), then the one saved by the profile, then the
+ * browser's. */
+function pageLang() {
+  let saved = null;
+  try {
+    saved = JSON.parse(window.localStorage?.getItem("selectedLanguage") || "null");
+  } catch (err) {
+    saved = null;
+  }
+  const hass = document.querySelector?.("home-assistant")?.hass;
+  const code = hass?.locale?.language || hass?.language || document.documentElement.lang || saved || navigator.language || "en";
+  return String(code).startsWith("it") ? "it" : "en";
+}
 const hassLang = (hass) => (((hass && (hass.locale?.language || hass.language)) || pageLang()).startsWith("it") ? "it" : "en");
 const tr = (lang, key, vars = {}) =>
   (STRINGS[lang][key] ?? STRINGS.en[key] ?? key).replace(/\{(\w+)\}/g, (_, name) => String(vars[name] ?? ""));
@@ -202,19 +225,20 @@ const startOfDay = (date) => new Date(date.getFullYear(), date.getMonth(), date.
 const daysBetween = (a, b) => Math.round((startOfDay(b) - startOfDay(a)) / 86400000);
 const daysInYear = (y) => (new Date(y, 1, 29).getMonth() === 1 ? 366 : 365);
 
-const PERIODS_PER_YEAR = { monthly: 12, bimonthly: 6, yearly: 1 };
-const periodicCosts = (entry) => (entry.costs || []).filter((c) => PERIODS_PER_YEAR[c.kind]);
+// Euro per year of a periodic cost, as computed by the integration (``yearly``; null for the costs per kWh).
+const yearlyOf = (cost) => (cost.yearly === null || cost.yearly === undefined ? null : Number(cost.yearly));
+const periodicCosts = (entry) => (entry.costs || []).filter((c) => yearlyOf(c) !== null);
 const perKwhCosts = (entry) => (entry.costs || []).filter((c) => c.kind === "per_kwh");
 const perKwhExtra = (entry) => perKwhCosts(entry).reduce((a, c) => a + Number(c.amount), 0);
 
 /**
- * Share of the periodic costs (all of them, or ``items``) in each bucket: ``amount x times a year / days of the
- * year`` per day, for the days from the first day of the history to ``until`` (by default the last day with
+ * Share of the periodic costs (all of them, or ``items``) in each bucket: ``euro per year / days of the year`` per
+ * day, for the days from the first day of the history to ``until`` (by default the last day with
  * data), split by the hours of the bucket on the day view (23, 24 or 25 per day). ``null`` where nothing
  * applies, like the statistics.
  */
 function fixedShares(entry, buckets, until = entry.last_day ? parseDay(entry.last_day) : null, items = periodicCosts(entry)) {
-  const yearly = items.reduce((a, c) => a + Number(c.amount) * (PERIODS_PER_YEAR[c.kind] || 0), 0);
+  const yearly = items.reduce((a, c) => a + (yearlyOf(c) || 0), 0);
   if (!yearly || !entry.prices || !until) return buckets.map(() => null);
   const first = entry.first_day ? parseDay(entry.first_day).getTime() : -Infinity;
   const stop = addDays(until, 1).getTime();
@@ -285,6 +309,7 @@ const fmt = (lang) => {
   return {
     kwh: (v) => `${number(v < 1 ? 3 : v < 10 ? 2 : v < 100 ? 1 : 0).format(v)} kWh`,
     eur: (v) => euro.format(v),
+    number: (v) => number(3).format(v),
     tick: (v, unit) => (unit === "eur" ? euro.format(v).replace(/[,.]00(?=\D|$)/, "") : number(v < 10 ? 1 : 0).format(v)),
     date,
     dayLong: (d) => date(d, { weekday: "long", day: "numeric", month: "long", year: "numeric" }),
@@ -299,15 +324,20 @@ const fmt = (lang) => {
 
 // ------------------------------------------------------------------------------------------ data access
 
+const INFO_MAX_AGE = 5 * 60000; // the integration's description is asked again at most every 5 minutes...
+const CHECK_EVERY = 60000; // ...and each card looks at it at most once a minute, on the updates of hass
 const infoCache = new WeakMap();
 
-/** The integration's description of its supplies, cached for a few minutes per connection. */
-async function getInfo(hass, force = false) {
+/**
+ * The integration's description of its supplies (statistics, prices, costs, data version), one request at a time
+ * for all the cards of a connection. ``maxAge`` Infinity: whatever is known, without waiting for the network.
+ */
+async function getInfo(hass, maxAge = INFO_MAX_AGE) {
   const key = hass.connection || hass;
   const cached = infoCache.get(key);
-  if (!force && cached && Date.now() - cached.time < 5 * 60000) return cached.promise;
+  if (cached && Date.now() - cached.time < maxAge) return cached.promise;
   const promise = hass.callWS({ type: "plenitude/info" }).catch((err) => {
-    infoCache.delete(key);
+    if (infoCache.get(key)?.promise === promise) infoCache.delete(key);
     throw err;
   });
   infoCache.set(key, { promise, time: Date.now() });
@@ -316,6 +346,81 @@ async function getInfo(hass, force = false) {
 
 const pickEntry = (info, entryId) =>
   (info.entries || []).find((e) => e.entry_id === entryId) || (info.entries || [])[0] || null;
+
+/** Every statistic of a supply: what is read for a period serves all the views and units of the cards. */
+function statisticIds(entry) {
+  const s = entry.statistics;
+  return [s.consumo, s.f1, s.f2, s.f3, s.costo, ...(entry.categories || []).map((c) => c.statistic_id)].filter(Boolean);
+}
+
+const STORE_PREFIX = "plenitude-cards:";
+const STORE_MAX = 40; // periods kept in the browser's storage (a few kB each)
+const MEMORY_MAX = 80;
+const memory = new Map(); // key -> promise of the changes, shared by all the cards of the page
+
+/** Periods already read, in the browser's localStorage. Best effort: blocked or full storage means memory only. */
+const browserStore = {
+  get(key) {
+    try {
+      const raw = window.localStorage?.getItem(STORE_PREFIX + key);
+      return raw ? JSON.parse(raw).changes : null;
+    } catch (err) {
+      return null;
+    }
+  },
+  set(key, supply, version, changes) {
+    try {
+      const storage = window.localStorage;
+      if (!storage) return;
+      const ours = [];
+      for (let i = 0; i < storage.length; i++) {
+        const name = storage.key(i);
+        if (name?.startsWith(STORE_PREFIX)) ours.push(name);
+      }
+      const kept = [];
+      for (const name of ours) {
+        // Other versions of the same supply are of no use any more.
+        if (name.startsWith(`${STORE_PREFIX}${supply}|`) && !name.startsWith(`${STORE_PREFIX}${supply}|${version}|`)) storage.removeItem(name);
+        else kept.push(name);
+      }
+      if (kept.length >= STORE_MAX) {
+        const saved = (name) => {
+          try {
+            return JSON.parse(storage.getItem(name)).saved || 0;
+          } catch (err) {
+            return 0;
+          }
+        };
+        kept.sort((a, b) => saved(a) - saved(b));
+        for (const name of kept.slice(0, kept.length - STORE_MAX + 1)) storage.removeItem(name);
+      }
+      storage.setItem(STORE_PREFIX + key, JSON.stringify({ saved: Date.now(), changes }));
+    } catch (err) {
+      // Storage blocked or full: the data stay in memory.
+    }
+  },
+};
+
+/**
+ * Change per bucket of every statistic of the supply in ``range``: ``{id: [number | null, ...]}``, read once per
+ * data version of the integration, then from memory or from the browser's storage. The result is shared: read only.
+ */
+function getChanges(hass, entry, range) {
+  const version = entry.version ?? "none";
+  const key = `${entry.entry_id}|${version}|${range.stat}|${range.start.getTime()}|${range.end.getTime()}`;
+  if (memory.has(key)) return memory.get(key);
+  const stored = browserStore.get(key);
+  const promise = stored
+    ? Promise.resolve(stored)
+    : fetchChanges(hass, statisticIds(entry), range).then((changes) => {
+        browserStore.set(key, entry.entry_id, version, changes);
+        return changes;
+      });
+  memory.set(key, promise);
+  promise.catch(() => memory.delete(key));
+  while (memory.size > MEMORY_MAX) memory.delete(memory.keys().next().value);
+  return promise;
+}
 
 /** Change per bucket of each statistic: ``{id: [number | null, ...]}``. */
 async function fetchChanges(hass, ids, range) {
@@ -515,6 +620,7 @@ function columnChart({ width, height, series, labels, colors, unit, format, onHo
 const STYLE = `
   :host { display: block; }
   ha-card { padding: 16px; box-sizing: border-box; position: relative; overflow: visible; }
+  ha-card.placeholder { min-height: 360px; }
   .head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
   h2 { margin: 0; font-size: 1.15rem; font-weight: 500; color: var(--primary-text-color); }
   .sub { color: var(--secondary-text-color); font-size: 0.9rem; }
@@ -585,6 +691,7 @@ class PlenitudeBase extends HTMLElement {
     super();
     this.attachShadow({ mode: "open" });
     this._loadedAt = 0;
+    this._checkedAt = 0;
     this._token = 0;
     this._width = 360;
   }
@@ -593,8 +700,30 @@ class PlenitudeBase extends HTMLElement {
     const first = !this._hass;
     const darkChanged = this._hass && !!this._hass.themes?.darkMode !== !!hass.themes?.darkMode;
     this._hass = hass;
-    if (first || Date.now() - this._loadedAt > 15 * 60000) this._load();
-    else if (darkChanged) this._render();
+    if (first) {
+      this._load();
+      return;
+    }
+    if (darkChanged) this._render();
+    if (Date.now() - this._checkedAt > CHECK_EVERY) this._check();
+  }
+
+  /** Has the integration written new data, or changed prices or costs? Then read again (from the cache if possible). */
+  async _check() {
+    this._checkedAt = Date.now();
+    if (!this._config) return;
+    if (this._entry === undefined) {
+      if (this._error) this._load(); // the first reading failed: try again
+      return;
+    }
+    try {
+      // Integration not loaded yet (Home Assistant starting): look again every minute, not every five.
+      const info = await getInfo(this._hass, this._entry ? INFO_MAX_AGE : CHECK_EVERY);
+      const entry = pickEntry(info, this._config.entry);
+      if (JSON.stringify(entry) !== JSON.stringify(this._entry)) this._load();
+    } catch (err) {
+      // Not reachable now: the card keeps what it shows and looks again later.
+    }
   }
 
   get hass() {
@@ -624,8 +753,9 @@ class PlenitudeBase extends HTMLElement {
     return this._hass?.themes?.darkMode ? PALETTE.dark : PALETTE.light;
   }
 
-  _shell(children) {
-    const card = el("ha-card", {}, children);
+  _shell(children, placeholder = false) {
+    // While loading the first time, the card keeps about its final height: the dashboard does not jump.
+    const card = el("ha-card", { class: placeholder ? "placeholder" : null }, children);
     this.shadowRoot.replaceChildren(el("style", { text: STYLE }), card);
     return card;
   }
@@ -643,14 +773,22 @@ class PlenitudeBase extends HTMLElement {
     container.querySelector(".tooltip")?.remove();
   }
 
+  /**
+   * Read the data of the card. What is in the cache arrives within the same task, so a card that Home Assistant
+   * re-creates shows its data at once; the description of the integration is the last one known (``_check``
+   * looks for a newer one right after). Real requests show the loading state only if they take a while.
+   */
   async _load() {
     if (!this._hass || !this._config) return;
     const token = ++this._token;
-    this._loading = true;
-    this._render();
+    if (!this._data) this._render();
+    const slow = setTimeout(() => {
+      if (token !== this._token) return;
+      this._loading = true;
+      this._render();
+    }, 150);
     try {
-      const stale = this._loadedAt > 0 && Date.now() - this._loadedAt > 15 * 60000;
-      const info = await getInfo(this._hass, stale);
+      const info = await getInfo(this._hass, Infinity);
       const entry = pickEntry(info, this._config.entry);
       const data = entry ? await this._fetch(entry) : null;
       if (token !== this._token) return;
@@ -661,6 +799,8 @@ class PlenitudeBase extends HTMLElement {
     } catch (err) {
       if (token !== this._token) return;
       this._error = err?.message || String(err);
+    } finally {
+      clearTimeout(slow);
     }
     this._loading = false;
     this._render();
@@ -727,10 +867,8 @@ class PlenitudeConsumptionCard extends PlenitudeBase {
     const range = periodRange(this._period, this._anchor);
     const { view, unit, categoriesBlocked } = this._effective(entry);
     const series = categoriesBlocked ? [] : buildSeries(entry, view, unit, this._lang);
-    const ids = [...new Set(series.flatMap((s) => s.parts.map((p) => p.id)))];
-    // The other unit for the summary line (kWh <-> EUR), when it exists.
-    const totalIds = [entry.statistics.consumo, entry.statistics.costo].filter(Boolean);
-    const changes = await fetchChanges(this._hass, [...new Set([...ids, ...totalIds])], range);
+    // Every statistic of the period at once (one request, then the cache): views and units switch at once.
+    const changes = await getChanges(this._hass, entry, range);
     const values = seriesValues(series, changes, range.buckets.length);
     // Fixed costs: in the totals always, in the chart as the bottom segment of the columns in euro.
     const fixed = fixedShares(entry, range.buckets);
@@ -753,7 +891,8 @@ class PlenitudeConsumptionCard extends PlenitudeBase {
     const title = this._config?.title || tr(lang, "default_title");
     if (!this._config) return;
     if (!this._data && !this._error) {
-      this._shell([el("h2", { text: title }), el("p", { class: "note", text: this._entry === null ? tr(lang, "not_configured") : tr(lang, "loading") })]);
+      const missing = this._entry === null;
+      this._shell([el("h2", { text: title }), el("p", { class: "note", text: missing ? tr(lang, "not_configured") : tr(lang, "loading") })], !missing);
       return;
     }
     if (this._error && !this._data) {
@@ -803,7 +942,7 @@ class PlenitudeConsumptionCard extends PlenitudeBase {
     ]);
     const viewButtons = el(
       "div",
-      { class: "group", role: "group", "aria-label": tr(lang, "view") },
+      { class: "group", role: "group", "aria-label": tr(lang, "view_label") },
       VIEWS.map((v) =>
         this._toolbarButton(tr(lang, v), this._view === v, () => {
           this._view = v;
@@ -813,7 +952,7 @@ class PlenitudeConsumptionCard extends PlenitudeBase {
     );
     const unitButtons = el(
       "div",
-      { class: "group", role: "group", "aria-label": tr(lang, "unit") },
+      { class: "group", role: "group", "aria-label": tr(lang, "unit_label") },
       ["kwh", "eur"].map((u) =>
         this._toolbarButton(
           tr(lang, u),
@@ -998,8 +1137,7 @@ class PlenitudeBillingCard extends PlenitudeBase {
     const today = startOfDay(new Date());
     const period = billingPeriod(parseDay(this._config.start_date), this._config.months, today, this._offset);
     const range = { start: period.start, end: period.end, stat: "day", buckets: dayBuckets(period.start, period.end) };
-    const s = entry.statistics;
-    const changes = await fetchChanges(this._hass, [s.consumo, s.f1, s.f2, s.f3, s.costo], range);
+    const changes = await getChanges(this._hass, entry, range);
     return { period, range, changes, isCurrent: this._offset === 0 };
   }
 
@@ -1018,7 +1156,7 @@ class PlenitudeBillingCard extends PlenitudeBase {
       return;
     }
     if (!this._data) {
-      this._shell([el("h2", { text: title }), el("p", { class: "note", text: tr(lang, "loading") })]);
+      this._shell([el("h2", { text: title }), el("p", { class: "note", text: tr(lang, "loading") })], true);
       return;
     }
     if (this._data.missingStart) {
@@ -1113,11 +1251,12 @@ class PlenitudeBillingCard extends PlenitudeBase {
     }
     // Cost breakdown, item by item, when there are costs besides the energy.
     if (eur !== null && dataDays && (entry.costs || []).length) {
+      const kind = (c) => tr(lang, `kind_${c.kind}`) + (c.kind === "per_kw_monthly" && c.power ? `, ${f.number(c.power)} kW` : "");
       const rows = [[tr(lang, "energy_cost"), null, usageEur - kwh * perKwhExtra(entry)]];
-      for (const c of perKwhCosts(entry)) rows.push([c.name, c.kind, kwh * Number(c.amount)]);
-      for (const c of periodicCosts(entry)) rows.push([c.name, c.kind, sum(fixedShares(entry, range.buckets, undefined, [c]))]);
-      const line = ([name, kind, value]) =>
-        el("tr", {}, [el("td", {}, [name, kind ? el("span", { class: "kind", text: ` · ${tr(lang, `kind_${kind}`)}` }) : null]), el("td", { text: f.eur(value) })]);
+      for (const c of perKwhCosts(entry)) rows.push([c.name, kind(c), kwh * Number(c.amount)]);
+      for (const c of periodicCosts(entry)) rows.push([c.name, kind(c), sum(fixedShares(entry, range.buckets, undefined, [c]))]);
+      const line = ([name, kindText, value]) =>
+        el("tr", {}, [el("td", {}, [name, kindText ? el("span", { class: "kind", text: ` · ${kindText}` }) : null]), el("td", { text: f.eur(value) })]);
       children.push(
         el("details", { class: "breakdown", open: true }, [
           el("summary", { text: tr(lang, "cost_breakdown") }),
@@ -1198,13 +1337,25 @@ if (!customElements.get("plenitude-billing-card")) {
   customElements.define("plenitude-billing-card", PlenitudeBillingCard);
 }
 
+// Names and descriptions for the card picker. Getters: this file is loaded before the frontend knows the language
+// of the user, and the picker reads them only when it opens.
 window.customCards = window.customCards || [];
 for (const [type, name, description] of [
   ["plenitude-consumption-card", "consumption_card", "consumption_card_desc"],
   ["plenitude-billing-card", "billing_card", "billing_card_desc"],
 ]) {
   if (!window.customCards.some((card) => card.type === type)) {
-    window.customCards.push({ type, name: tr(pageLang(), name), description: tr(pageLang(), description), preview: false });
+    window.customCards.push({
+      type,
+      get name() {
+        return tr(pageLang(), name);
+      },
+      get description() {
+        return tr(pageLang(), description);
+      },
+      preview: false,
+      documentationURL: "https://github.com/paoloaq/ha-plenitude",
+    });
   }
 }
 

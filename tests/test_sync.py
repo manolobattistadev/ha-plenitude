@@ -17,8 +17,16 @@ from pytest_homeassistant_custom_component.components.recorder.common import asy
 
 from custom_components.plenitude.api import CATEGORIES, ROME, PlenitudeAuthError, PlenitudeSessionExpired
 from custom_components.plenitude.bands import BANDS, PRICE_MODE, band, price_of
-from custom_components.plenitude.const import CONF_SUPPLY, DOMAIN, LOGIN_PAUSE, statistic_prefix, supply_key
-from custom_components.plenitude.coordinator import session_store
+from custom_components.plenitude.const import (
+    CONF_SUPPLY,
+    DOMAIN,
+    FIRST_RESULTS_DAYS,
+    HISTORY_WORKERS,
+    LOGIN_PAUSE,
+    statistic_prefix,
+    supply_key,
+)
+from custom_components.plenitude.coordinator import PlenitudeCoordinator, PlenitudeData, session_store
 
 from .conftest import KWH_PER_HOUR, POD, FakeClient, FakePortal, day_hours
 
@@ -92,15 +100,29 @@ async def test_first_import(recorder_mock, hass: HomeAssistant, freezer, fake_cl
     gap = date(2026, 11, 12)
     fake_client.days = days(date(2026, 10, 20), date(2026, 11, 20)) - {gap}
 
-    await setup(hass, THREE_BANDS)
+    # The last days are published while the history is still being read.
+    published: list[tuple[date | None, int]] = []
+    set_updated_data = PlenitudeCoordinator.async_set_updated_data
+
+    def spy(self: PlenitudeCoordinator, data: PlenitudeData) -> None:
+        published.append((data.last_day, len(fake_client.day_requests)))
+        set_updated_data(self, data)
+
+    with patch.object(PlenitudeCoordinator, "async_set_updated_data", spy):
+        await setup(hass, THREE_BANDS)
+    rounds = -(-FIRST_RESULTS_DAYS // HISTORY_WORKERS)
+    assert published[0] == (date(2026, 11, 20), rounds * HISTORY_WORKERS)
 
     energy = await rows(hass, ENERGY)
     hours = sum(len(day_hours(d)) for d in fake_client.days)
     assert len(energy) == hours == 31 * 24 + 1  # 25 October has 25 hours
-    assert_consistent(energy)
+    assert_consistent(energy)  # the first results were rewritten with the sums of the whole history
     assert energy[-1]["sum"] == pytest.approx(hours * KWH_PER_HOUR)
-    # The walk back stopped after the run of empty days.
-    assert min(fake_client.day_requests) == date(2026, 10, 20) - timedelta(days=31)
+    # The walk back stopped after the run of empty days (at most the rest of the last round beyond it).
+    first_empty_run_end = date(2026, 10, 20) - timedelta(days=31)
+    assert first_empty_run_end - timedelta(days=HISTORY_WORKERS - 1) <= min(fake_client.day_requests)
+    assert min(fake_client.day_requests) <= first_empty_run_end
+    assert len(fake_client.day_requests) == len(set(fake_client.day_requests))  # every day asked once
 
     # The bands split every hour without losing anything, F1 only on working days.
     band_rows = {name: await rows(hass, f"{PREFIX}_{name}") for name in BANDS}
@@ -134,7 +156,7 @@ async def test_late_day_and_transient_failure(
     fake_client.days = days(date(2026, 10, 20), date(2026, 11, 20)) - {gap}
     entry = await setup(hass, THREE_BANDS)
 
-    # Next day: two more days, the missing day has arrived, and one stored day is not returned this time.
+    # Next day: two more days, the missing day has arrived; a stored day would not be returned this time.
     freezer.move_to(datetime(2026, 11, 23, 12, tzinfo=ROME))
     fake_client.days |= {gap, date(2026, 11, 21)}
     fake_client.hidden = {date(2026, 11, 15)}
@@ -143,7 +165,8 @@ async def test_late_day_and_transient_failure(
     await hass.async_block_till_done()
     await async_wait_recording_done(hass)
 
-    assert min(fake_client.day_requests) == gap  # rechecked although older than the last imported day
+    # Only the missing days are asked: the gap (older than the last imported day), the new day and yesterday.
+    assert sorted(fake_client.day_requests) == [gap, date(2026, 11, 21), date(2026, 11, 22)]
     energy = await rows(hass, ENERGY)
     assert_consistent(energy)
     hours = sum(len(day_hours(d)) for d in fake_client.days)
@@ -206,9 +229,10 @@ async def test_info_for_the_cards(hass: HomeAssistant, hass_ws_client, fake_clie
     assert info["last_day"] == last_day.isoformat()
     assert info["prices"] == {"f1": 0.30, "f2": 0.25, "f3": 0.20}
     assert info["costs"] == [
-        {"name": "Quota fissa", "kind": "monthly", "amount": 10.0},
-        {"name": "Oneri", "kind": "per_kwh", "amount": 0.05},
+        {"name": "Quota fissa", "kind": "monthly", "amount": 10.0, "yearly": 120.0},
+        {"name": "Oneri", "kind": "per_kwh", "amount": 0.05, "yearly": None},
     ]
+    assert info["version"]  # set once the statistics are written
     assert info["statistics"] == {
         "consumo": ENERGY,
         "f1": f"{PREFIX}_f1",
@@ -431,4 +455,106 @@ async def test_every_day_refused_is_an_error(hass: HomeAssistant, freezer, fake_
     fake_client.refused = days(date(2023, 1, 1), date(2026, 11, 21))
     entry = await setup(hass, {PRICE_MODE: "none"})
     assert not entry.runtime_data.last_update_success
-    assert len(fake_client.day_requests) == 31  # stopped at the run of days without data
+    # Stopped at the run of days without data (asked in rounds).
+    assert 31 <= len(fake_client.day_requests) < 31 + HISTORY_WORKERS
+
+
+async def test_start_without_the_network(recorder_mock, hass: HomeAssistant, freezer, fake_client: FakePortal) -> None:
+    """The supply found once is kept: the entry starts (and reloads) without asking the customer area, and the
+    first sync of each day checks the supply again."""
+    freezer.move_to(datetime(2026, 11, 22, 12, tzinfo=ROME))
+    fake_client.days = days(date(2026, 11, 10), date(2026, 11, 20))
+    entry = await setup(hass, {PRICE_MODE: "none"})
+    assert fake_client.account_requests == 1
+    assert entry.runtime_data.contract_power == 4.5
+
+    with patch.object(FakeClient, "get_account", side_effect=TimeoutError()):
+        await hass.config_entries.async_reload(entry.entry_id)
+        await hass.async_block_till_done(wait_background_tasks=True)
+    assert entry.state is ConfigEntryState.LOADED
+    assert entry.runtime_data.last_update_success  # same day: supply not asked again
+    assert entry.runtime_data.contract_power == 4.5
+
+    freezer.move_to(datetime(2026, 11, 23, 12, tzinfo=ROME))
+    await entry.runtime_data.async_refresh()
+    await hass.async_block_till_done()
+    assert fake_client.account_requests == 2
+
+
+async def test_interrupted_first_import_starts_again(
+    recorder_mock, hass: HomeAssistant, freezer, fake_client: FakePortal
+) -> None:
+    """Only the first results are in the recorder (Home Assistant stopped during the first import): the whole
+    history is read again, and the sums stay consistent."""
+    freezer.move_to(datetime(2026, 11, 22, 12, tzinfo=ROME))
+    fake_client.days = days(date(2026, 9, 1), date(2026, 11, 20))
+    entry = await setup(hass, {PRICE_MODE: "none"})
+    coordinator = entry.runtime_data
+    del coordinator._state["first_day"]  # as after the first results only
+    fake_client.days.discard(date(2026, 11, 15))  # a day the portal does not give back this time
+    fake_client.day_requests.clear()
+    await coordinator.async_refresh()
+    await hass.async_block_till_done()
+    await async_wait_recording_done(hass)
+    assert min(fake_client.day_requests) < date(2026, 9, 1)
+    energy = await rows(hass, ENERGY)
+    assert_consistent(energy)
+    assert energy[-1]["sum"] == pytest.approx(sum(len(day_hours(d)) for d in fake_client.days) * KWH_PER_HOUR)
+    assert coordinator.first_day == date(2026, 9, 1)
+
+
+async def test_session_over_during_a_round(
+    recorder_mock, hass: HomeAssistant, freezer, fake_client: FakePortal
+) -> None:
+    """The requests of a round find the portal session over together: one renewal, then the round again."""
+    freezer.move_to(datetime(2026, 11, 22, 12, tzinfo=ROME))
+    fake_client.days = days(date(2026, 11, 1), date(2026, 11, 20))
+    entry = await setup(hass, {PRICE_MODE: "none"})
+    freezer.move_to(datetime(2026, 11, 25, 12, tzinfo=ROME))
+    fake_client.days |= days(date(2026, 11, 21), date(2026, 11, 23))
+    fake_client.expire_next = HISTORY_WORKERS
+    renewals = fake_client.renewals
+    await entry.runtime_data.async_refresh()
+    await hass.async_block_till_done()
+    await async_wait_recording_done(hass)
+    assert entry.runtime_data.last_update_success
+    assert fake_client.renewals == renewals + 1
+    assert_consistent(await rows(hass, ENERGY))
+    assert entry.runtime_data.data.last_day == date(2026, 11, 23)
+
+
+async def test_data_version_changes_with_new_data(
+    recorder_mock, hass: HomeAssistant, freezer, fake_client: FakePortal
+) -> None:
+    freezer.move_to(datetime(2026, 11, 22, 12, tzinfo=ROME))
+    fake_client.days = days(date(2026, 11, 10), date(2026, 11, 20))
+    entry = await setup(hass, {PRICE_MODE: "none"})
+    coordinator = entry.runtime_data
+    first = coordinator.data_version
+    assert first
+
+    freezer.tick(timedelta(hours=6))  # nothing new: same version
+    await coordinator.async_refresh()
+    await hass.async_block_till_done()
+    assert coordinator.data_version == first
+
+    freezer.move_to(datetime(2026, 11, 23, 12, tzinfo=ROME))
+    fake_client.days.add(date(2026, 11, 21))
+    await coordinator.async_refresh()
+    await hass.async_block_till_done()
+    assert coordinator.data_version not in (None, first)
+
+
+async def test_cost_per_kw_suggests_the_power_of_the_contract(
+    recorder_mock, hass: HomeAssistant, freezer, fake_client: FakePortal
+) -> None:
+    freezer.move_to(datetime(2026, 11, 22, 12, tzinfo=ROME))
+    fake_client.days = days(date(2026, 11, 18), date(2026, 11, 20))
+    entry = await setup(hass, {PRICE_MODE: "none"})
+    result = await hass.config_entries.subentries.async_init((entry.entry_id, "cost"), context={"source": "user"})
+    result = await hass.config_entries.subentries.async_configure(
+        result["flow_id"], {"name": "Quota potenza", "kind": "per_kw_monthly", "amount": 1.716}
+    )
+    assert result["step_id"] == "power"
+    (power,) = result["data_schema"].schema
+    assert power.description == {"suggested_value": 4.5}

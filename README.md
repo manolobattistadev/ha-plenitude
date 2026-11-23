@@ -66,8 +66,9 @@ It is an integration, not an add-on: it works with every installation type (Home
 3. If the account has more than one electricity supply, choose the one to import. To import another one, add
    the integration again.
 
-The first import starts right away, in the background: it reads the history one day at a time, going back from
-yesterday until it finds a month without data (at most three years). It takes a few minutes.
+The first import starts right away, in the background: it reads the history going back from yesterday, three days
+at a time, until it finds a month without data (at most three years). The last two weeks appear in a few seconds;
+the whole history follows in a few minutes (about 6 minutes for three years).
 
 ### Prices and costs
 Plenitude does not expose the price of your offer, so the cost is computed from prices and costs you enter.
@@ -82,10 +83,13 @@ Plenitude does not expose the price of your offer, so the cost is computed from 
 | Three bands | F1, F2 and F3 |
 
 **Other costs.** In the same page select **Add cost**, as many times as you need. Each cost has:
-- **Name**: free text, for example TV licence, fixed fee, power, system charges;
-- **Type**: monthly, every two months, yearly or per kWh;
-- **Amount**: in euro (euro per kWh for the costs per kWh), at most 6 decimals. Use a negative amount for a
-  discount.
+- **Name**: free text, for example TV licence, fixed fee, power fee, system charges;
+- **Type**: monthly, every two months, yearly, per kW per month or per kWh;
+- **Amount**: in euro (euro per kWh for the costs per kWh, euro per kW for the costs per kW per month), at most 6
+  decimals. Use a negative amount for a discount.
+- **Power**, only for the costs per kW per month (the power fee of the bill, *quota potenza*): the power of the
+  contract in kW, as in the bill (*potenza impegnata*). The value of the customer area is suggested when it is
+  known.
 
 The costs are listed under the integration, where you can edit or delete them.
 
@@ -93,14 +97,14 @@ How they are counted:
 - **Per kWh** costs are added to the price of every hour: they are in the cost statistic, in the Energy dashboard,
   in the sensor and in the cards. When prices or costs per kWh change, the cost of the whole history is
   recomputed.
-- **Monthly, two-monthly and yearly** costs do not depend on the hours, so they are **not** in the cost statistic
-  nor in the Energy dashboard. The cards spread them over the days: `amount × times a year / days of the year`
-  (12 times for monthly, 6 for two-monthly, once for yearly), from the first to the last day with data. The
-  current bill card lists every cost.
+- **Monthly, two-monthly, yearly and per kW per month** costs do not depend on the hours, so they are **not** in
+  the cost statistic nor in the Energy dashboard. The cards spread them over the days: `euro a year / days of the
+  year`, where euro a year is the amount × 12 for monthly, × 6 for two-monthly, × 1 for yearly and × power × 12 for
+  the costs per kW per month, from the first to the last day with data. The current bill card lists every cost.
 
 **Getting close to the bill.** Use the energy price of your offer as the price, then add the other lines of a bill
-as costs: transport, system charges and excise duty per kWh; fixed fee, power and TV licence as periodic costs.
-Include VAT in every amount.
+as costs: transport, system charges and excise duty per kWh; fixed fee and TV licence as periodic costs; the power
+fee as a cost per kW per month. Include VAT in every amount.
 
 ## What you get
 
@@ -148,6 +152,11 @@ to add them as resources. In a dashboard select **Edit → Add card**, search fo
 in the visual editor. The cards follow the language of your user profile (Italian or English) and the light or
 dark theme.
 
+The statistics change once a day, when new days are imported. The cards keep what they read until then: in
+memory for all the cards of the page, and in the browser's storage across reloads of the page (a few kB per
+period, at most 40 periods). Coming back to a dashboard, or switching view or unit on a card, does not read the
+statistics again; new data appear within about 5 minutes of their import.
+
 ### Consumption
 A column chart. In the settings you choose the default period, view and unit. On the card you can change them,
 move back and forth, and go back to the latest data. Hover or tap a column to see its values; **Table** shows
@@ -161,7 +170,8 @@ unit: kwh          # kwh | eur
 ```
 
 - **Categories** are daily estimates: they are not available in the day view, and only in kWh.
-- **In euro**, the monthly, two-monthly and yearly costs appear as the gray segment at the bottom of the columns.
+- **In euro**, the periodic costs (monthly, two-monthly, yearly, per kW per month) appear as the gray segment at
+  the bottom of the columns.
 
 ### Current bill
 Consumption and cost from the start of the current billing period to the last day with data. It also shows:
@@ -209,9 +219,13 @@ Italian and English; every other language falls back to English.
 
 | What | Follows |
 |---|---|
-| Configuration, options, entity names, errors | the language of each user |
+| Configuration, options, costs, errors in the forms, states (*unknown*), number format | the language of each user's profile |
 | Cards | the language of each user's profile |
+| Names of the entities | the language of the server |
 | Names of the statistics, title of the entry, device model | the language of the server when they are created |
+
+If some texts are in Italian and others in English, the language of the server (**Settings → System → General**)
+and the one of your profile (your name at the bottom of the sidebar → **Language**) differ: set both.
 
 ## Privacy and security
 - **Credentials.** Email and password are kept in the configuration entry, like every integration that signs in
@@ -250,6 +264,8 @@ To report a vulnerability, see [SECURITY.md](SECURITY.md).
   configured, the integration signs in again by itself, at most every 15 minutes.
 - **Some days are missing.** The customer area itself sometimes has no data for some days. The integration asks
   again for the missing days of the last two weeks, once a day.
+- **The sensors stay *unknown* after the first configuration.** The first import is still running: the last two
+  weeks appear within seconds, the rest in a few minutes (log: *Plenitude: first import, …*).
 - **The cards do not appear** in *Add card*. Make sure the integration is loaded, then reload the page without
   the cache (or clear the cache of the companion app). Do not add the cards as dashboard resources: the
   integration loads them.

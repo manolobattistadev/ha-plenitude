@@ -45,7 +45,7 @@
     "step": {
       "init": {
         "title": "Energy price",
-        "description": "Plenitude does not expose the price of the offer: enter it to get the cost too. If you change it, the cost of the whole history is recomputed. Other costs (fixed fees, TV licence, charges per kWh) are added with **Add cost** in the integration page.",
+        "description": "Plenitude does not expose the price of the offer: enter it to get the cost too. If you change it, the cost of the whole history is recomputed. Other costs (fixed fees, power fee, TV licence, charges per kWh) are added with **Add cost** in the integration page.",
         "data": {
           "price_mode": "Price type"
         }
@@ -84,6 +84,7 @@
         "monthly": "Monthly",
         "bimonthly": "Every two months",
         "yearly": "Yearly",
+        "per_kw_monthly": "Per kW per month",
         "per_kwh": "Per kWh"
       }
     }
@@ -131,16 +132,16 @@
       "step": {
         "user": {
           "title": "Add a cost",
-          "description": "A cost of your contract besides the price of the energy. Monthly, two-monthly and yearly costs are spread over the days in the cards; costs per kWh are added to the price of every hour, also in the Energy dashboard.",
+          "description": "A cost of your contract besides the price of the energy. Monthly, two-monthly, yearly and per kW per month costs are spread over the days in the cards; costs per kWh are added to the price of every hour, also in the Energy dashboard.",
           "data": {
             "name": "Name",
             "kind": "Type",
             "amount": "Amount"
           },
           "data_description": {
-            "name": "Any text, for example: TV licence, fixed fee, power, system charges.",
-            "kind": "How the amount is charged: every month, every two months, every year, or for each kWh consumed.",
-            "amount": "Euro, at most 6 decimals (euro per kWh for the costs per kWh). Use a negative amount for a discount."
+            "name": "Any text, for example: TV licence, fixed fee, power fee, system charges.",
+            "kind": "How the amount is charged: every month, every two months, every year, every month for each kW of the contract power (power fee), or for each kWh consumed.",
+            "amount": "Euro, at most 6 decimals: euro per kWh for the costs per kWh, euro per kW for the costs per kW per month. Use a negative amount for a discount."
           }
         },
         "reconfigure": {
@@ -151,15 +152,26 @@
             "amount": "Amount"
           },
           "data_description": {
-            "name": "Any text, for example: TV licence, fixed fee, power, system charges.",
-            "kind": "How the amount is charged: every month, every two months, every year, or for each kWh consumed.",
-            "amount": "Euro, at most 6 decimals (euro per kWh for the costs per kWh). Use a negative amount for a discount."
+            "name": "Any text, for example: TV licence, fixed fee, power fee, system charges.",
+            "kind": "How the amount is charged: every month, every two months, every year, every month for each kW of the contract power (power fee), or for each kWh consumed.",
+            "amount": "Euro, at most 6 decimals: euro per kWh for the costs per kWh, euro per kW for the costs per kW per month. Use a negative amount for a discount."
+          }
+        },
+        "power": {
+          "title": "Contract power",
+          "description": "**{name}** is charged every month for each kW of the contract power: the bill shows it as committed power (potenza impegnata). The customer area's value is suggested when it is known.",
+          "data": {
+            "power": "Power"
+          },
+          "data_description": {
+            "power": "kW, for example 3, 4.5 or 6."
           }
         }
       },
       "error": {
         "empty_name": "Enter a name.",
-        "too_many_decimals": "At most 6 decimals."
+        "too_many_decimals": "At most 6 decimals.",
+        "invalid_power": "Enter a power between 0.1 and 999 kW, with at most 6 decimals."
       },
       "abort": {
         "reconfigure_successful": "Cost updated."

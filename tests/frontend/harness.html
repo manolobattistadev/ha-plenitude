@@ -38,6 +38,7 @@
 <script src="../../custom_components/plenitude/frontend/plenitude-cards.js"></script>
 </head>
 <body>
+<pre id="report">pending</pre>
 <section class="theme light" id="light"><h1>Tema chiaro</h1></section>
 <section class="theme dark" id="dark"><h1>Tema scuro</h1></section>
 <section class="theme light" id="english"><h1>English (user profile language)</h1></section>
@@ -47,11 +48,12 @@
   const LAST_DAY = "2026-11-20";
   const LAST = new Date(2026, 10, 21).getTime();
   const PRICES = { f1: 0.31, f2: 0.27, f3: 0.22 };
+  // As plenitude/info sends them: ``yearly`` is euro per year (null for the costs per kWh).
   const COSTS = [
-    { name: "Quota fissa", kind: "monthly", amount: 8.5 },
-    { name: "Quota potenza", kind: "bimonthly", amount: 7.2 },
-    { name: "Canone RAI", kind: "yearly", amount: 90 },
-    { name: "Oneri di sistema", kind: "per_kwh", amount: 0.035 },
+    { name: "Quota fissa", kind: "monthly", amount: 8.5, yearly: 102 },
+    { name: "Quota potenza", kind: "per_kw_monthly", amount: 1.85, power: 3, yearly: 66.6 },
+    { name: "Canone RAI", kind: "yearly", amount: 90, yearly: 90 },
+    { name: "Oneri di sistema", kind: "per_kwh", amount: 0.035, yearly: null },
   ];
   const EXTRA = 0.035; // sum of the costs per kWh, as in the cost statistic
   const CATS = ["comfort_ambientale", "standby", "lavare", "elettronica_luci", "refrigerare", "cucinare", "ricarica_elettrica", "altro"];
@@ -105,19 +107,26 @@
     }
     return out;
   }
+  const requests = { info: 0, statistics: 0 };
+  const connection = {}; // one connection for the page, as in Home Assistant
   function makeHass(dark, lang = "it") {
     return {
-      language: lang, locale: { language: lang }, themes: { darkMode: dark }, connection: {},
+      language: lang, locale: { language: lang }, themes: { darkMode: dark }, connection,
       async callWS(msg) {
         if (msg.type === "plenitude/info") {
+          requests.info += 1;
           return { entries: [{
-            entry_id: "demo", title: "Plenitude luce", first_day: "2026-01-04", last_day: LAST_DAY, price_mode: "three", prices: PRICES,
+            entry_id: "demo", title: "Plenitude luce", version: "harness", first_day: "2026-01-04", last_day: LAST_DAY, price_mode: "three", prices: PRICES,
             costs: COSTS, currency: "EUR",
             statistics: { consumo: P + "_consumo", f1: P + "_f1", f2: P + "_f2", f3: P + "_f3", costo: P + "_costo" },
             categories: CATS.map((c, i) => ({ key: c, name: NAMES[i], statistic_id: P + "_cat_" + c })),
           }] };
         }
-        if (msg.type === "recorder/statistics_during_period") return statistics(msg);
+        if (msg.type === "recorder/statistics_during_period") {
+          requests.statistics += 1;
+          await new Promise((resolve) => setTimeout(resolve, 200)); // a recorder that takes its time
+          return statistics(msg);
+        }
         throw new Error("unexpected " + msg.type);
       },
     };
@@ -148,6 +157,27 @@
       card.hass = hass;
     }
   }
+  // Re-create the cards of the light theme, as Home Assistant does on every reconnection: they must show their
+  // data at once, without new requests. The result is written in #report (read it with --dump-dom).
+  setTimeout(() => {
+    const before = { ...requests };
+    const section = document.getElementById("light");
+    const hass = makeHass(false, "it");
+    const fresh = [];
+    for (const old of [...section.querySelectorAll("plenitude-consumption-card, plenitude-billing-card")]) {
+      const card = document.createElement(old.localName);
+      card.setConfig(old._config);
+      old.replaceWith(card);
+      card.hass = hass;
+      fresh.push(card);
+    }
+    queueMicrotask(() => setTimeout(() => {
+      const loading = fresh.filter((card) => /Caricamento|Loading/.test(card.shadowRoot.textContent)).length;
+      document.getElementById("report").textContent =
+        `recreated=${fresh.length} loading=${loading} new_statistics_requests=${requests.statistics - before.statistics} ` +
+        `new_info_requests=${requests.info - before.info} total_statistics_requests=${requests.statistics}`;
+    }, 0));
+  }, 1200);
   // Show one tooltip, as when hovering a column.
   setTimeout(() => {
     const card = document.querySelector("#light plenitude-consumption-card");

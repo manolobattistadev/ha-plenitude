@@ -44,3 +44,29 @@ def test_only_prices_and_costs_per_kwh_rebuild_the_history() -> None:
     assert cost_signature(SINGLE, [CostItem("Oneri", "per_kwh", 0.01)]) != base
     assert cost_signature({"price_mode": "single", "price": 0.25}, []) != cost_signature(SINGLE, [])
     assert cost_signature(NO_PRICE, []) == "none"
+
+
+def test_yearly_amount_of_the_periodic_costs() -> None:
+    assert CostItem("Quota fissa", "monthly", 10).yearly == pytest.approx(120)
+    assert CostItem("Bimestre", "bimonthly", 10).yearly == pytest.approx(60)
+    assert CostItem("RAI", "yearly", 90).yearly == pytest.approx(90)
+    assert CostItem("Quota potenza", "per_kw_monthly", 1.5, power=4.5).yearly == pytest.approx(1.5 * 4.5 * 12)
+    assert CostItem("Oneri", "per_kwh", 0.05).yearly is None  # follows the consumption
+
+
+def test_power_is_kept_only_for_the_costs_per_kw() -> None:
+    data = {"name": "Quota potenza", "kind": "per_kw_monthly", "amount": 1.5, "power": 6}
+    item = CostItem.from_data(data)
+    assert item.power == 6.0 and item.as_dict() == {**data, "power": 6.0}
+    # A cost changed to another kind forgets the power; costs saved before 0.4.0 have none.
+    assert CostItem.from_data({**data, "kind": "monthly"}).as_dict() == {
+        "name": "Quota potenza",
+        "kind": "monthly",
+        "amount": 1.5,
+    }
+    assert CostItem.from_data({"name": "RAI", "kind": "yearly", "amount": 90}).power is None
+
+
+def test_costs_per_kw_do_not_rebuild_the_history() -> None:
+    base = cost_signature(SINGLE, [])
+    assert cost_signature(SINGLE, [CostItem("Quota potenza", "per_kw_monthly", 1.5, power=3)]) == base

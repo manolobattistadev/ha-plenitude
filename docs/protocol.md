@@ -63,7 +63,7 @@ All under `https://eniplenitude.com/serviceDAp`, with the portal cookies.
 |---|---|
 | `GET /api/c360/init` | customer and account codes |
 | `GET /api/contiServices/conti/{account}/lista-forniture` | supplies (POD, address, contract) |
-| `GET /api/profilo-energetico-services/{account}/users/{customer}/supplies` | supplies with the consumption analysis (house and contract ids) |
+| `GET /api/profilo-energetico-services/{account}/users/{customer}/supplies` | supplies with the consumption analysis (house and contract ids, `contractPower` in kW) |
 | `POST /api/profilo-energetico-services/{account}/analysis/consumptions` | consumption: `type` 0 = one day (24 hourly values in `data`, 96 quarter-hours in `additionalData`), 2 = one month (one value per day, per category) |
 | `GET /api/consumptionData` | monthly values by band (not used: they do not match calendar months) |
 
@@ -75,4 +75,8 @@ All under `https://eniplenitude.com/serviceDAp`, with the portal cookies.
   categories: 1 refrigerare, 2 standby, 3 lavare, 4 cucinare, 5 comfort_ambientale, 6 elettronica_luci, 7 altro,
   8 ricarica_elettrica.
 - Data arrive about two days late; some days are missing in the customer area itself.
+- **Requests at the same time.** Measured on 2026-11-23, same session, rounds interleaved (one at a time, three at
+  a time, one, three): 15 day views in 15 s one at a time with a 0.4 s pause, in 5-6 s three at a time with a
+  0.4 s pause after each round; average latency 0.6-0.7 s in both, same answers, no errors. The integration asks
+  three at a time; a session over in a round is renewed once and the round repeated.
 - Error responses are reported with the path only, with long numbers masked: paths contain customer codes.

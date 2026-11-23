@@ -111,6 +111,7 @@ class Supply:
     contract_id: str | None = None
     house_id: str | None = None
     address: str | None = None
+    contract_power: float | None = None  # kW, as the customer area gives it (``contractPower``)
 
 
 @dataclass
@@ -250,6 +251,15 @@ def _sequence(items: list[dict[str, Any]] | None, day: date, step: timedelta) ->
         if item.get("consumption") is not None:
             readings.append(Reading(start=moment.astimezone(ROME), kwh=float(item["consumption"])))
     return readings, server_ok
+
+
+def _power(value: Any) -> float | None:
+    """Power of the contract in kW (``"6"``, ``4.5``, ``"4,5"``); None when missing or not a positive number."""
+    try:
+        power = float(str(value).replace(",", "."))
+    except (TypeError, ValueError):
+        return None
+    return power if 0 < power < 1000 else None
 
 
 def _readings(items: list[dict[str, Any]] | None) -> list[Reading]:
@@ -548,6 +558,7 @@ class PlenitudeClient:
                     continue
                 supply.contract_id = str(item["contractId"])
                 supply.house_id = str(item["houseId"])
+                supply.contract_power = _power(item.get("contractPower"))
                 break
         return supplies
 

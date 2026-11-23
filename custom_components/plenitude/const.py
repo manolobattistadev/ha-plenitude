@@ -6,7 +6,7 @@ import hashlib
 from datetime import timedelta
 
 DOMAIN = "plenitude"
-VERSION = "0.3.6"
+VERSION = "0.4.0"
 
 # Cards (frontend/plenitude-cards.js), served by the integration and loaded by the frontend.
 CARDS_URL = "/plenitude_static"
@@ -27,8 +27,14 @@ RECHECK_DAYS = 14
 # First import: walk back until this many consecutive days without data, at most HISTORY_MAX_DAYS.
 HISTORY_EMPTY_RUN = 31
 HISTORY_MAX_DAYS = 3 * 366
-# Pause between requests during the first import, to be gentle with the portal.
+# First import: days asked three at a time, with a pause after each round, to be gentle with the portal. Measured
+# on 2026-11-23, same session, rounds interleaved: 15 days in 15 s one at a time, in 5-6 s three at a time, with
+# the same answers and no errors.
+HISTORY_WORKERS = 3
 REQUEST_PAUSE = 0.4
+# First import: the most recent days are written as soon as they are read, so that sensors and cards show
+# something in seconds; the whole history follows (minutes for years of data) and rewrites them.
+FIRST_RESULTS_DAYS = 14
 
 STORAGE_VERSION = 1
 

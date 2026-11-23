@@ -168,3 +168,23 @@ async def test_newer_cookie_on_root_wins() -> None:
         client._fix_cookie_paths()
         assert [c.value for c in session.cookie_jar if c.key == "GAESA"] == ["new"]
         assert session.cookie_jar.filter_cookies(SUPPLIES)["GAESA"].value == "new"
+
+
+@pytest.mark.parametrize(
+    ("value", "power"),
+    [
+        ("6", 6.0),
+        (4.5, 4.5),
+        ("4,5", 4.5),
+        ("3.0", 3.0),
+        (None, None),
+        ("", None),
+        ("0", None),
+        ("abc", None),
+        ("nan", None),
+    ],
+)
+def test_power_of_the_contract(value, power) -> None:
+    from custom_components.plenitude.api import _power
+
+    assert _power(value) == power

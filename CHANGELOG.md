@@ -4,6 +4,38 @@ All notable changes to this project are listed here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [semantic versioning](https://semver.org/).
 
+## [0.4.0] - 2026-11-23
+
+### Added
+- Costs **per kW per month** (the power fee of the bill): amount in euro per kW and, in a second step, the power of
+  the contract in kW, suggested from the customer area (`contractPower`). The cards spread them over the days
+  like the monthly costs; the current bill card shows the power next to the cost.
+- `plenitude/info` returns the data version (it changes when statistics are written) and the euro per year of
+  every periodic cost.
+
+### Changed
+- Cards: what they read is kept until the integration writes new data, in memory for all the cards of the page
+  and in the browser's localStorage across reloads (at most 40 periods). Before, every card read its statistics
+  again every 15 minutes, and from scratch whenever Home Assistant re-created the cards: on every reconnection,
+  for example when coming back to a tab hidden for more than 5 minutes. Measured in the cards harness, 6 cards
+  re-created: 0.3.6 showed *Loading* on 6 and made 6 new requests to the recorder, 0.4.0 none.
+- Cards: one request per period for every statistic of the supply, shared by the cards with the same period
+  (6 requests instead of 17 in the harness); switching view or unit does not read again. While loading the
+  first time a card keeps about its final height.
+- Start without the network: the supply found once is stored, so starting Home Assistant and reloading the entry
+  (after every change of prices or costs) no longer wait for the customer area. The first sync of each day checks
+  the supply again.
+- Regular syncs ask only the missing days; before, every day from the first missing one to yesterday.
+- First import: three days at a time with a pause after each round (measured on the real customer area, same
+  session, rounds interleaved: 15 days in 5-6 s instead of 15 s, same answers, no errors); the last two weeks are
+  written at once, so sensors and cards show data in seconds, and the whole history follows. An interrupted first
+  import starts again.
+
+### Fixed
+- Card picker: names and descriptions in the language of the user's profile. They were computed when the file
+  loaded, before the frontend set the language, and could appear in English.
+- README: the names of the entities follow the language of the server, not the one of each user.
+
 ## [0.3.6] - 2026-11-23
 
 ### Fixed

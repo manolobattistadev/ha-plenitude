@@ -42,8 +42,10 @@ from .costs import (
     COST_KIND,
     COST_KINDS,
     COST_NAME,
+    COST_POWER,
     COST_SUBENTRY,
     KIND_MONTHLY,
+    KIND_PER_KW_MONTHLY,
     CostItem,
     has_valid_decimals,
 )
@@ -64,7 +66,8 @@ CREDENTIALS_SCHEMA = vol.Schema(
 PRICE_SELECTOR = NumberSelector(
     NumberSelectorConfig(min=0, max=10, step="any", mode=NumberSelectorMode.BOX, unit_of_measurement="€/kWh")
 )
-# One form for every kind of cost: the unit stays "€" and the description says "per kWh" where it applies.
+# One form for every kind of cost: the unit stays "€" and the description says "per kWh" or "per kW" where it
+# applies; the costs per kW per month ask the power in a second step.
 # Negative amounts are allowed, for discounts and bonuses. The selector cannot step by 0.000001 (its minimum
 # step is 0.001): the six decimals are checked by the form.
 COST_SCHEMA = vol.Schema(
@@ -78,6 +81,14 @@ COST_SCHEMA = vol.Schema(
                 min=-100000, max=100000, step="any", mode=NumberSelectorMode.BOX, unit_of_measurement="€"
             )
         ),
+    }
+)
+
+POWER_SCHEMA = vol.Schema(
+    {
+        vol.Required(COST_POWER): NumberSelector(
+            NumberSelectorConfig(min=0.1, max=999, step="any", mode=NumberSelectorMode.BOX, unit_of_measurement="kW")
+        )
     }
 )
 
@@ -261,11 +272,15 @@ class PlenitudeOptionsFlow(OptionsFlowWithReload):
 
 
 class CostSubentryFlow(ConfigSubentryFlow):
-    """An additional cost: free name, kind (monthly, two-monthly, yearly, per kWh) and amount in euro.
+    """An additional cost: free name, kind (monthly, two-monthly, yearly, per kW per month, per kWh) and amount in
+    euro; for the costs per kW per month, the power of the contract in a second step.
 
     Home Assistant lists the costs under the entry, with buttons to add, edit and delete them. The entry is
     reloaded when they change (see ``__init__``), so that the cost history follows the costs per kWh.
     """
+
+    def __init__(self) -> None:
+        self._cost: CostItem | None = None
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> SubentryFlowResult:
         return await self._form("user", user_input)
@@ -273,8 +288,11 @@ class CostSubentryFlow(ConfigSubentryFlow):
     async def async_step_reconfigure(self, user_input: dict[str, Any] | None = None) -> SubentryFlowResult:
         return await self._form("reconfigure", user_input)
 
+    def _editing(self) -> dict[str, Any]:
+        """Data of the cost being edited, empty for a new one."""
+        return dict(self._get_reconfigure_subentry().data) if self.source == "reconfigure" else {}
+
     async def _form(self, step_id: str, user_input: dict[str, Any] | None) -> SubentryFlowResult:
-        subentry = self._get_reconfigure_subentry() if step_id == "reconfigure" else None
         errors: dict[str, str] = {}
         if user_input is not None:
             name = str(user_input[COST_NAME]).strip()
@@ -284,11 +302,44 @@ class CostSubentryFlow(ConfigSubentryFlow):
             elif not has_valid_decimals(amount):
                 errors[COST_AMOUNT] = "too_many_decimals"
             else:
-                data = CostItem(name=name, kind=user_input[COST_KIND], amount=amount).as_dict()
-                if subentry is None:
-                    return self.async_create_entry(title=name, data=data)
-                return self.async_update_and_abort(self._get_entry(), subentry, title=name, data=data)
-        suggested = user_input or (dict(subentry.data) if subentry else {COST_KIND: KIND_MONTHLY})
+                self._cost = CostItem(name=name, kind=user_input[COST_KIND], amount=amount)
+                if self._cost.kind == KIND_PER_KW_MONTHLY:
+                    return await self.async_step_power()
+                return self._save(self._cost)
+        suggested = user_input or self._editing() or {COST_KIND: KIND_MONTHLY}
         return self.async_show_form(
             step_id=step_id, data_schema=self.add_suggested_values_to_schema(COST_SCHEMA, suggested), errors=errors
         )
+
+    async def async_step_power(self, user_input: dict[str, Any] | None = None) -> SubentryFlowResult:
+        """Power of the contract for a cost per kW per month: the one already entered, or the customer area's."""
+        assert self._cost is not None
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            power = float(user_input[COST_POWER])
+            if not 0 < power < 1000 or not has_valid_decimals(power):
+                errors[COST_POWER] = "invalid_power"
+            else:
+                return self._save(
+                    CostItem(name=self._cost.name, kind=self._cost.kind, amount=self._cost.amount, power=power)
+                )
+        known = self._editing().get(COST_POWER) or self._portal_power()
+        suggested = user_input or ({COST_POWER: known} if known else {})
+        return self.async_show_form(
+            step_id="power",
+            data_schema=self.add_suggested_values_to_schema(POWER_SCHEMA, suggested),
+            description_placeholders={"name": self._cost.name},
+            errors=errors,
+        )
+
+    def _portal_power(self) -> float | None:
+        coordinator = getattr(self._get_entry(), "runtime_data", None)
+        return getattr(coordinator, "contract_power", None)
+
+    def _save(self, item: CostItem) -> SubentryFlowResult:
+        data = item.as_dict()
+        if self.source == "reconfigure":
+            return self.async_update_and_abort(
+                self._get_entry(), self._get_reconfigure_subentry(), title=item.name, data=data
+            )
+        return self.async_create_entry(title=item.name, data=data)

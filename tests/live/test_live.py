@@ -33,7 +33,7 @@ from pytest_homeassistant_custom_component.components.recorder.common import asy
 from custom_components.plenitude.api import CATEGORIES, ROME
 from custom_components.plenitude.bands import BANDS, PRICE_MODE, band, price_of
 from custom_components.plenitude.const import DOMAIN
-from custom_components.plenitude.coordinator import session_store
+from custom_components.plenitude.coordinator import PlenitudeCoordinator, session_store
 
 pytestmark = pytest.mark.skipif(os.environ.get("PLENITUDE_LIVE") != "1", reason="live check: PLENITUDE_LIVE=1")
 
@@ -142,6 +142,16 @@ def ranges(days: list[date]) -> str:
 
 async def test_live(hass: HomeAssistant, network, plain_sessions) -> None:
     email, password = keychain_credentials()
+    # When the first results of the first import are published (sensors and cards show the last days).
+    published: list[datetime] = []
+    set_updated_data = PlenitudeCoordinator.async_set_updated_data
+
+    def spy(self, data):
+        published.append(datetime.now())
+        set_updated_data(self, data)
+
+    patcher = patch.object(PlenitudeCoordinator, "async_set_updated_data", spy)
+    patcher.start()
     result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": SOURCE_USER})
     result = await hass.config_entries.flow.async_configure(result["flow_id"], {"email": email, "password": password})
     if result["type"] is FlowResultType.FORM and result["step_id"] == "supply":
@@ -154,9 +164,13 @@ async def test_live(hass: HomeAssistant, network, plain_sessions) -> None:
     hass.config_entries.async_update_entry(entry, options=PRICES)
     started = datetime.now()
     await hass.async_block_till_done(wait_background_tasks=True)
+    patcher.stop()
     coordinator = entry.runtime_data
     check(coordinator.last_update_success, f"primo import non riuscito: {coordinator.last_exception}")
-    print(f"Primo import: {(datetime.now() - started).seconds} s")
+    first = f"{(published[0] - started).seconds} s" if published else "mai"
+    print(f"Primo import: {(datetime.now() - started).seconds} s; prime due settimane visibili dopo {first}")
+    print(f"Potenza del contratto dall'area clienti: {'presente' if coordinator.contract_power else 'assente'}")
+    print(f"Versione dei dati per le card: {'presente' if coordinator.data_version else 'assente'}")
 
     ids = {coordinator.energy_id, coordinator.cost_id, *(coordinator.band_id(b) for b in BANDS)}
     ids |= {coordinator.category_id(slug) for slug in CATEGORIES.values()}

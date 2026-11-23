@@ -15,9 +15,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Awaitable, Callable, Iterator
+from collections.abc import Awaitable, Callable, Iterator, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
+from functools import partial
 from typing import Any
 
 import aiohttp
@@ -54,11 +55,14 @@ from .api import (
 )
 from .bands import BANDS, band
 from .const import (
+    CATEGORY_ORDER,
     CATEGORY_PREFIX,
     CONF_SUPPLY,
     DOMAIN,
+    FIRST_RESULTS_DAYS,
     HISTORY_EMPTY_RUN,
     HISTORY_MAX_DAYS,
+    HISTORY_WORKERS,
     LOGIN_PAUSE,
     RECHECK_DAYS,
     REQUEST_PAUSE,
@@ -238,11 +242,29 @@ class PlenitudeCoordinator(DataUpdateCoordinator[PlenitudeData]):
 
     # ------------------------------------------------------------------ session
 
+    @property
+    def data_version(self) -> str | None:
+        """Changes every time statistics are written (and committed): the cards reload their data then."""
+        return self._state.get("data_version")
+
+    @property
+    def contract_power(self) -> float | None:
+        """Power of the contract in kW, as the customer area gives it (suggested for the costs per kW)."""
+        return self.supply.contract_power if self.supply else None
+
     async def async_prepare(self) -> None:
-        """Load the saved session and find the supply. Called by the setup of the config entry."""
+        """Load the saved session and the supply. Called by the setup of the config entry.
+
+        The supply found by an earlier run is used as it is, without the network: Home Assistant starts (and the
+        entry reloads, after every change of prices or costs) at once, and the first sync of each day checks it
+        again with the customer area.
+        """
         self._state = await self._store.async_load() or {}
         self.client.import_state(self._state.get("session") or {})
+        if self._restore_supply():
+            return
         await self._ensure_supply()
+        await self._save()
 
     async def _save(self) -> None:
         self._state["session"] = self.client.export_state()
@@ -296,8 +318,28 @@ class PlenitudeCoordinator(DataUpdateCoordinator[PlenitudeData]):
             await self._save()
             raise UpdateFailed(translation_domain=DOMAIN, translation_key="portal_refused") from err
 
-    async def _ensure_supply(self) -> None:
-        if self.supply is not None:
+    def _restore_supply(self) -> bool:
+        """Account and supply saved by an earlier run, if they belong to this entry."""
+        cached = self._state.get("supply") or {}
+        if cached.get(CONF_SUPPLY) != self.config_entry.data[CONF_SUPPLY]:
+            return False
+        if not all(cached.get(key) for key in ("client_code", "account_code", "contract_id", "house_id")):
+            return False
+        self._account = Account(client_code=cached["client_code"], account_code=cached["account_code"])
+        self.supply = Supply(
+            kind=cached.get("kind") or "",
+            pod=None,  # not stored: the requests need the contract and the house only
+            pdr=None,
+            contract_id=cached["contract_id"],
+            house_id=cached["house_id"],
+            contract_power=cached.get("contract_power"),
+        )
+        return True
+
+    async def _ensure_supply(self, today: date | None = None) -> None:
+        """Find the supply in the account, unless it is already known (and, with ``today``, checked today)."""
+        cached = self._state.get("supply") or {}
+        if self.supply is not None and (today is None or cached.get("checked") == today.isoformat()):
             return
         if not self.client.has_portal_session():
             await self._renew()
@@ -309,29 +351,70 @@ class PlenitudeCoordinator(DataUpdateCoordinator[PlenitudeData]):
                 if not supply.contract_id or not supply.house_id:
                     raise UpdateFailed(translation_domain=DOMAIN, translation_key="analysis_unavailable")
                 self._account, self.supply = account, supply
+                self._state["supply"] = {
+                    CONF_SUPPLY: wanted,
+                    "client_code": account.client_code,
+                    "account_code": account.account_code,
+                    "kind": supply.kind,
+                    "contract_id": supply.contract_id,
+                    "house_id": supply.house_id,
+                    "contract_power": supply.contract_power,
+                    "checked": dt_util.now(ROME).date().isoformat(),
+                }
                 return
         raise UpdateFailed(translation_domain=DOMAIN, translation_key="supply_missing")
 
-    async def _get_day(self, day: date) -> DayConsumption:
-        """Consumption of one day. A day the portal refuses (HTTP 400) counts as a day without data: one day
+    @staticmethod
+    async def _round[T](requests: Sequence[Callable[[], Awaitable[T]]]) -> list[T | PlenitudeBadRequest]:
+        """Run some requests together. A refused request (HTTP 400) is returned as it is; any other failure
+        is raised, the end of the session first, so that ``_call`` renews it once and repeats the round."""
+        answers = await asyncio.gather(*(request() for request in requests), return_exceptions=True)
+        failures = [a for a in answers if isinstance(a, BaseException) and not isinstance(a, PlenitudeBadRequest)]
+        for failure in failures:
+            if isinstance(failure, PlenitudeSessionExpired):
+                raise failure
+        if failures:
+            raise failures[0]
+        return answers  # type: ignore[return-value]
+
+    async def _in_rounds[T](self, requests: Sequence[Callable[[], Awaitable[T]]]) -> list[T | PlenitudeBadRequest]:
+        """``HISTORY_WORKERS`` requests at a time, with a pause after each round, to be gentle with the portal."""
+        answers: list[T | PlenitudeBadRequest] = []
+        for start in range(0, len(requests), HISTORY_WORKERS):
+            answers += await self._call(partial(self._round, requests[start : start + HISTORY_WORKERS]))
+            await asyncio.sleep(REQUEST_PAUSE)
+        return answers
+
+    def _note_refused(self, label: str, err: PlenitudeBadRequest) -> None:
+        self._refused.append(label)
+        self._refusal = err
+
+    async def _get_days(self, days: Sequence[date]) -> list[DayConsumption]:
+        """Consumption of some days. A day the portal refuses (HTTP 400) counts as a day without data: one day
         must not block the import of all the others. The refusals are reported once per sync."""
         assert self._account and self.supply
-        try:
-            return await self._call(lambda: self.client.get_day(self._account, self.supply, day))
-        except PlenitudeBadRequest as err:
-            self._refused.append(day.isoformat())
-            self._refusal = err
-            return DayConsumption(day=day, status=None, hours=[], quarter_hours=[])
+        account, supply = self._account, self.supply
+        answers = await self._in_rounds([partial(self.client.get_day, account, supply, day) for day in days])
+        results: list[DayConsumption] = []
+        for day, answer in zip(days, answers, strict=True):
+            if isinstance(answer, PlenitudeBadRequest):
+                self._note_refused(day.isoformat(), answer)
+                answer = DayConsumption(day=day, status=None, hours=[], quarter_hours=[])
+            results.append(answer)
+        return results
 
-    async def _get_month(self, year: int, month: int) -> MonthConsumption:
-        """Categories of one month. A month the portal refuses (HTTP 400) has no categories."""
+    async def _get_months(self, months: Sequence[tuple[int, int]]) -> list[MonthConsumption]:
+        """Categories of some months. A month the portal refuses (HTTP 400) has no categories."""
         assert self._account and self.supply
-        try:
-            return await self._call(lambda: self.client.get_month(self._account, self.supply, year, month))
-        except PlenitudeBadRequest as err:
-            self._refused.append(f"{year}-{month:02d}")
-            self._refusal = err
-            return MonthConsumption(year=year, month=month, status=None, days={}, names={})
+        account, supply = self._account, self.supply
+        answers = await self._in_rounds([partial(self.client.get_month, account, supply, y, m) for y, m in months])
+        results: list[MonthConsumption] = []
+        for (year, month), answer in zip(months, answers, strict=True):
+            if isinstance(answer, PlenitudeBadRequest):
+                self._note_refused(f"{year}-{month:02d}", answer)
+                answer = MonthConsumption(year=year, month=month, status=None, days={}, names={})
+            results.append(answer)
+        return results
 
     def _report_refused(self) -> None:
         if not self._refused:
@@ -384,6 +467,15 @@ class PlenitudeCoordinator(DataUpdateCoordinator[PlenitudeData]):
     def _clear(self, ids: list[str]) -> None:
         get_instance(self.hass).async_clear_statistics(ids)
 
+    async def _written(self) -> None:
+        """Statistics were written: once the recorder has committed them, a new version tells the cards."""
+        try:
+            async with asyncio.timeout(60):
+                await get_instance(self.hass).async_block_till_done()
+        except TimeoutError:
+            _LOGGER.debug("Recorder still busy after 60 s: the cards may reload before the data are written")
+        self._state["data_version"] = dt_util.utcnow().isoformat()
+
     # --------------------------------------------------------------------- sync
 
     async def _async_update_data(self) -> PlenitudeData:
@@ -401,13 +493,21 @@ class PlenitudeCoordinator(DataUpdateCoordinator[PlenitudeData]):
                 self._report_refused()
 
     async def _sync(self) -> PlenitudeData:
-        await self._ensure_supply()
         today = dt_util.now(ROME).date()
         yesterday = today - timedelta(days=1)
+        await self._ensure_supply(today)
         last = await self._recorder(get_last_statistics, 1, self.energy_id, True, {"sum"})
-        first_import = not last.get(self.energy_id)
+        # ``first_day`` is saved when the whole history is imported: without it, the first import was never
+        # completed (the first results of an interrupted one may be in the recorder) and starts again.
+        first_import = not last.get(self.energy_id) or not self._state.get("first_day")
 
         if first_import:
+            if last.get(self.energy_id):
+                # The first results of an interrupted first import: start from a clean slate, so that no row left
+                # from it keeps sums that do not follow the new ones (a day the portal does not give back now).
+                self._clear(
+                    [self.energy_id, self.cost_id, *map(self.band_id, BANDS), *map(self.category_id, CATEGORY_ORDER)]
+                )
             days = await self._fetch_history(yesterday)
             if not days and self._refusal is not None:
                 # Every day refused: an error, not an account without data.
@@ -435,17 +535,13 @@ class PlenitudeCoordinator(DataUpdateCoordinator[PlenitudeData]):
                 self._state["gaps_checked"] = today.isoformat()
                 await self._save()
                 return await self._summary()
+            # Only the missing days: ``_import`` keeps the stored ones in between.
             window_start = missing[0]
-            days = []
-            for day in _days(window_start, yesterday):
-                days.append(await self._get_day(day))
+            days = await self._get_days(missing)
 
         months: list[MonthConsumption] = []
         if any(day.hours for day in days):  # categories only follow new measured days
-            for year, month in sorted({(day.year, day.month) for day in _days(window_start, yesterday)}):
-                months.append(await self._get_month(year, month))
-                if first_import:
-                    await asyncio.sleep(REQUEST_PAUSE)
+            months = await self._get_months(sorted({(day.year, day.month) for day in _days(window_start, yesterday)}))
 
         result = await self._import(window_start, days, months, first_import)
         self._state["gaps_checked"] = today.isoformat()
@@ -453,24 +549,47 @@ class PlenitudeCoordinator(DataUpdateCoordinator[PlenitudeData]):
         return result
 
     async def _fetch_history(self, yesterday: date) -> list[DayConsumption]:
-        """First import: walk back from yesterday until a long run of days without data."""
+        """First import: walk back from yesterday until a long run of days without data.
+
+        The days are asked a few at a time; the history ends where the run of empty days reaches
+        ``HISTORY_EMPTY_RUN``, as if they were asked one by one (the other days of that round are ignored).
+        The first ``FIRST_RESULTS_DAYS`` days are written at once (``_first_results``).
+        """
         days: list[DayConsumption] = []
         empty_run = 0
-        for offset in range(HISTORY_MAX_DAYS):
-            day = yesterday - timedelta(days=offset)
-            result = await self._get_day(day)
-            if result.hours:
-                days.append(result)
-                empty_run = 0
-            else:
-                empty_run += 1
+        offset = 0
+        published = False
+        while offset < HISTORY_MAX_DAYS and empty_run < HISTORY_EMPTY_RUN:
+            batch = [
+                yesterday - timedelta(days=offset + i) for i in range(min(HISTORY_WORKERS, HISTORY_MAX_DAYS - offset))
+            ]
+            for result in await self._get_days(batch):
                 if empty_run >= HISTORY_EMPTY_RUN:
                     break
-            if offset and offset % 30 == 0:
-                _LOGGER.info("Plenitude: first import, %d days read, %d with data", offset + 1, len(days))
-            await asyncio.sleep(REQUEST_PAUSE)
+                if result.hours:
+                    days.append(result)
+                    empty_run = 0
+                else:
+                    empty_run += 1
+            if offset // 30 != (offset + len(batch)) // 30:
+                _LOGGER.info("Plenitude: first import, %d days read, %d with data", offset + len(batch), len(days))
+            offset += len(batch)
+            if not published and days and offset >= FIRST_RESULTS_DAYS:
+                published = True
+                await self._first_results(days)
         days.reverse()
         return days
+
+    async def _first_results(self, days: list[DayConsumption]) -> None:
+        """First import: write the days read so far, so that sensors and cards show them in seconds.
+
+        Their sums start from 0; the import of the whole history, minutes later, rewrites the same hours with
+        the sums from the first day.
+        """
+        recent = sorted(days, key=lambda day: day.day)
+        summary = await self._import(recent[0].day, recent, [], first_import=True)
+        _LOGGER.info("Plenitude: first import, the last %d days are available, the history follows", len(recent))
+        self.async_set_updated_data(summary)
 
     async def _import(
         self, window_start: date, days: list[DayConsumption], months: list[MonthConsumption], first_import: bool
@@ -555,6 +674,7 @@ class PlenitudeCoordinator(DataUpdateCoordinator[PlenitudeData]):
         if rebuild_cost:
             await self._rebuild_cost(energy)
         self._state["price_signature"] = signature
+        await self._written()
         _LOGGER.debug("Plenitude: imported %d hours from %s", len(rows[self.energy_id]), window_start)
 
         return self._day_summary(last_energy_day, energy)
@@ -564,6 +684,7 @@ class PlenitudeCoordinator(DataUpdateCoordinator[PlenitudeData]):
         if self._state.get("price_signature") != signature:
             await self._rebuild_cost({})
             self._state["price_signature"] = signature
+            await self._written()
 
     async def _rebuild_cost(self, recent: dict[datetime, float]) -> None:
         """Prices or costs per kWh changed: rewrite the whole cost history from the stored hourly consumption."""

@@ -173,6 +173,56 @@ async def test_costs(hass: HomeAssistant) -> None:
     assert dict(entry.subentries[subentry_id].data) == {"name": "Canone TV", "kind": "monthly", "amount": 9.0}
 
 
+def suggested(result: dict, field: str):
+    for key in result["data_schema"].schema:
+        if key == field:
+            return (key.description or {}).get("suggested_value")
+    raise KeyError(field)
+
+
+async def test_cost_per_kw_asks_the_power(hass: HomeAssistant) -> None:
+    """A cost per kW per month asks the power of the contract in a second step, and keeps it when edited."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id=supply_key(POD),
+        data={**CREDENTIALS, CONF_SUPPLY: supply_key(POD)},
+        options={PRICE_MODE: "none"},
+    )
+    entry.add_to_hass(hass)
+    result = await hass.config_entries.subentries.async_init((entry.entry_id, "cost"), context={"source": "user"})
+    result = await hass.config_entries.subentries.async_configure(
+        result["flow_id"], {"name": "Quota potenza", "kind": "per_kw_monthly", "amount": 1.716}
+    )
+    assert result["type"] is FlowResultType.FORM and result["step_id"] == "power"
+    assert result["description_placeholders"] == {"name": "Quota potenza"}
+    assert suggested(result, "power") is None  # entry not loaded: no power from the customer area
+    result = await hass.config_entries.subentries.async_configure(result["flow_id"], {"power": 4.1234567})
+    assert result["errors"] == {"power": "invalid_power"}  # 0 and negatives are refused by the selector itself
+    result = await hass.config_entries.subentries.async_configure(result["flow_id"], {"power": 4.5})
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    (subentry_id,) = entry.subentries
+    expected = {"name": "Quota potenza", "kind": "per_kw_monthly", "amount": 1.716, "power": 4.5}
+    assert dict(entry.subentries[subentry_id].data) == expected
+
+    # Edit: the power entered before is suggested.
+    result = await entry.start_subentry_reconfigure_flow(hass, subentry_id)
+    result = await hass.config_entries.subentries.async_configure(
+        result["flow_id"], {"name": "Quota potenza", "kind": "per_kw_monthly", "amount": 1.8}
+    )
+    assert result["step_id"] == "power" and suggested(result, "power") == 4.5
+    result = await hass.config_entries.subentries.async_configure(result["flow_id"], {"power": 6})
+    assert result["type"] is FlowResultType.ABORT and result["reason"] == "reconfigure_successful"
+    assert dict(entry.subentries[subentry_id].data) == {**expected, "amount": 1.8, "power": 6.0}
+
+    # Changed to a monthly cost: no second step, no power.
+    result = await entry.start_subentry_reconfigure_flow(hass, subentry_id)
+    result = await hass.config_entries.subentries.async_configure(
+        result["flow_id"], {"name": "Quota fissa", "kind": "monthly", "amount": 9}
+    )
+    assert result["type"] is FlowResultType.ABORT
+    assert dict(entry.subentries[subentry_id].data) == {"name": "Quota fissa", "kind": "monthly", "amount": 9.0}
+
+
 @pytest.mark.parametrize("refused", [False, True])
 async def test_the_throw_away_login_is_closed(hass: HomeAssistant, refused: bool) -> None:
     """The login of the configuration is closed, also when the portal refuses the data."""

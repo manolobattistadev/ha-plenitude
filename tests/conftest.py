@@ -15,6 +15,7 @@ from custom_components.plenitude.api import (
     DayConsumption,
     MonthConsumption,
     PlenitudeBadRequest,
+    PlenitudeSessionExpired,
     Reading,
     Supply,
 )
@@ -49,6 +50,9 @@ class FakePortal:
     logouts: int = 0
     refused: set[date] = field(default_factory=set)
     refused_months: set[tuple[int, int]] = field(default_factory=set)
+    account_requests: int = 0
+    renewals: int = 0
+    expire_next: int = 0  # the next requests of days find the portal session over (HTTP 406)
 
     def available(self, day: date) -> bool:
         return day in self.days and day not in self.hidden
@@ -64,6 +68,7 @@ class FakeClient:
         return True
 
     async def open_portal_session(self) -> int:
+        self.portal.renewals += 1
         return 300
 
     async def login(self, email, password, session_expiration=3000):
@@ -80,13 +85,27 @@ class FakeClient:
         return None
 
     async def get_account(self) -> Account:
+        self.portal.account_requests += 1
         return Account(client_code="C", account_code="A")
 
     async def get_supplies(self, account) -> list[Supply]:
-        return [Supply(kind="LUCE", pod=POD, pdr=None, contract_id="1", house_id="2", address="Via di prova 1")]
+        return [
+            Supply(
+                kind="LUCE",
+                pod=POD,
+                pdr=None,
+                contract_id="1",
+                house_id="2",
+                address="Via di prova 1",
+                contract_power=4.5,
+            )
+        ]
 
     async def get_day(self, account, supply, day: date) -> DayConsumption:
         self.portal.day_requests.append(day)
+        if self.portal.expire_next:
+            self.portal.expire_next -= 1
+            raise PlenitudeSessionExpired("/api/profilo-energetico-services/…/analysis/consumptions: HTTP 406")
         if day in self.portal.refused:
             raise PlenitudeBadRequest("/api/profilo-energetico-services/…/analysis/consumptions: HTTP 400")
         if not self.portal.available(day):

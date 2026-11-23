@@ -24,13 +24,16 @@ def entry_info(entry_id: str, title: str, coordinator: PlenitudeCoordinator) -> 
     return {
         "entry_id": entry_id,
         "title": title,
+        # Changes when statistics are written: the cards keep what they read until it changes.
+        "version": coordinator.data_version,
         "first_day": coordinator.first_day.isoformat() if coordinator.first_day else None,
         "last_day": data.last_day.isoformat() if data and data.last_day else None,
         "price_mode": options.get(PRICE_MODE, PRICE_NONE),
         # Energy price of each band (0 without a price of the energy); None when there is no cost at all.
         "prices": {name: price_of(name, options) or 0.0 for name in BANDS} if coordinator.has_cost else None,
-        # Additional costs: the cards add the costs per kWh to the band prices and spread the periodic ones.
-        "costs": [item.as_dict() for item in coordinator.cost_items],
+        # Additional costs: the cards add the costs per kWh to the band prices and spread the periodic ones
+        # (``yearly``: euro per year, None for the costs per kWh).
+        "costs": [{**item.as_dict(), "yearly": item.yearly} for item in coordinator.cost_items],
         "currency": CURRENCY,
         "statistics": {
             STAT_ENERGY: coordinator.energy_id,

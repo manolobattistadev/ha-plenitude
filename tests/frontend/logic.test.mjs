@@ -84,19 +84,21 @@ test("bands in EUR use the price of each band; two-band contracts show F1 and F2
   assert.equal(values[0].values[1], null); // no data stays "no data", not zero
 });
 
-test("periodic costs: amount x times a year / days of the year, from the first to the last day with data", () => {
+test("periodic costs: euro per year / days of the year, from the first to the last day with data", () => {
+  // ``yearly`` as the integration sends it (plenitude/info): amount x times a year, x power for the costs per kW.
   const entry = {
     prices: { f1: 0.3, f2: 0.3, f3: 0.3 },
     costs: [
-      { name: "Monthly", kind: "monthly", amount: 18.25 },
-      { name: "Two-monthly", kind: "bimonthly", amount: 18.25 },
-      { name: "Yearly", kind: "yearly", amount: 36.5 },
-      { name: "Per kWh", kind: "per_kwh", amount: 0.05 },
+      { name: "Monthly", kind: "monthly", amount: 9.125, yearly: 109.5 },
+      { name: "Two-monthly", kind: "bimonthly", amount: 18.25, yearly: 109.5 },
+      { name: "Power", kind: "per_kw_monthly", amount: 1.825, power: 5, yearly: 109.5 },
+      { name: "Yearly", kind: "yearly", amount: 36.5, yearly: 36.5 },
+      { name: "Per kWh", kind: "per_kwh", amount: 0.05, yearly: null },
     ],
     first_day: "2026-01-04",
     last_day: "2026-11-20",
   };
-  const perDay = (18.25 * 12 + 18.25 * 6 + 36.5) / 365; // 1.0 EUR a day in 2026; per kWh costs excluded
+  const perDay = (109.5 * 3 + 36.5) / 365; // 1.0 EUR a day in 2026; per kWh costs excluded
   const november = periodRange("month", day(2026, 11, 10));
   const shares = fixedShares(entry, november.buckets);
   assert.ok(Math.abs(shares[0] - perDay) < 1e-9);
@@ -108,7 +110,7 @@ test("periodic costs: amount x times a year / days of the year, from the first t
   // Whole period on request (estimate at the end of the period), and one item alone (cost breakdown).
   const full = fixedShares(entry, november.buckets, day(2026, 11, 30));
   assert.ok(Math.abs(full.reduce((a, v) => a + v, 0) - 30 * perDay) < 1e-9);
-  const yearlyOnly = fixedShares(entry, november.buckets, undefined, [entry.costs[2]]);
+  const yearlyOnly = fixedShares(entry, november.buckets, undefined, [entry.costs[3]]);
   assert.ok(Math.abs(yearlyOnly[0] - 0.1) < 1e-9);
   // Day view: split by the real hours of the day, 25 on 25 October.
   const longDay = fixedShares(entry, periodRange("day", day(2026, 10, 25)).buckets);
@@ -135,4 +137,108 @@ test("category names: the portal's in Italian, translated in English", () => {
   assert.equal(categoryName("it", category), "Comfort Ambientale (HVAC)");
   assert.equal(categoryName("en", category), "Heating and cooling (HVAC)");
   assert.equal(categoryName("en", { key: "nuova", name: "Nuova" }), "Nuova"); // unknown key: the portal's name
+});
+
+// ----------------------------------------------------------------------------- cache and language
+
+/** A fresh copy of the cards, as after a reload of the page, with the given browser storage and language. */
+function freshCards({ storage = new Map(), lang = "it", selected = null } = {}) {
+  if (selected !== null) storage.set("selectedLanguage", JSON.stringify(selected));
+  const localStorage = {
+    get length() {
+      return storage.size;
+    },
+    key: (i) => [...storage.keys()][i] ?? null,
+    getItem: (k) => (storage.has(k) ? storage.get(k) : null),
+    setItem: (k, v) => storage.set(k, String(v)),
+    removeItem: (k) => storage.delete(k),
+  };
+  const box = {
+    HTMLElement: class {},
+    customElements: { get: () => undefined, define: () => {} },
+    window: { localStorage },
+    document: { documentElement: { lang }, querySelector: () => null },
+    navigator: { language: "en-US" },
+    console: { info: () => {} },
+    Intl,
+    Date,
+    Math,
+    JSON,
+    Promise,
+  };
+  box.window.customCards = [];
+  vm.createContext(box);
+  vm.runInContext(source, box);
+  return { box, storage };
+}
+
+function fakeHass(calls) {
+  return {
+    connection: {},
+    callWS: async (msg) => {
+      calls.push(msg.type);
+      const rows = Object.fromEntries(msg.statistic_ids.map((id) => [id, [{ start: new Date(msg.start_time).getTime(), change: 1 }]]));
+      return rows;
+    },
+  };
+}
+
+const ENTRY = {
+  entry_id: "e1",
+  version: "v1",
+  statistics: { consumo: "c", f1: "a", f2: "b", f3: "d", costo: null },
+  categories: [{ key: "altro", statistic_id: "k" }],
+};
+
+test("a period is read once per data version, for every statistic, and kept across reloads of the page", async () => {
+  const { box, storage } = freshCards();
+  const calls = [];
+  const hass = fakeHass(calls);
+  const range = box.periodRange("month", day(2026, 11, 10));
+  const first = await box.getChanges(hass, ENTRY, range);
+  assert.deepEqual(Object.keys(first).sort(), ["a", "b", "c", "d", "k"]); // all of them: views switch at once
+  await box.getChanges(hass, ENTRY, box.periodRange("month", day(2026, 11, 25)));
+  assert.equal(calls.length, 1); // same month: from memory
+
+  // Reload of the page: from the browser's storage, no request.
+  const again = freshCards({ storage });
+  const reloaded = await again.box.getChanges(hass, ENTRY, again.box.periodRange("month", day(2026, 11, 10)));
+  assert.equal(calls.length, 1);
+  assert.equal(reloaded.c[0], 1);
+  assert.equal(reloaded.c[0], first.c[0]);
+
+  // New data in the integration: read again, and the old version leaves the storage.
+  await again.box.getChanges(hass, { ...ENTRY, version: "v2" }, again.box.periodRange("month", day(2026, 11, 10)));
+  assert.equal(calls.length, 2);
+  const names = [...storage.keys()].filter((k) => k.startsWith("plenitude-cards:"));
+  assert.equal(names.length, 1);
+  assert.ok(names[0].includes("|v2|"));
+});
+
+test("the browser's storage keeps a bounded number of periods", async () => {
+  const { box, storage } = freshCards();
+  const hass = fakeHass([]);
+  for (let i = 0; i < 60; i++) await box.getChanges(hass, ENTRY, box.periodRange("day", new Date(2026, 0, 1 + i)));
+  assert.equal([...storage.keys()].filter((k) => k.startsWith("plenitude-cards:")).length, 40);
+});
+
+test("blocked storage: the cards work from memory", async () => {
+  const { box } = freshCards();
+  box.window.localStorage.setItem = () => {
+    throw new Error("QuotaExceededError");
+  };
+  const calls = [];
+  const range = box.periodRange("week", day(2026, 11, 10));
+  await box.getChanges(fakeHass(calls), ENTRY, range);
+  await box.getChanges(fakeHass(calls), ENTRY, range);
+  assert.equal(calls.length, 1);
+});
+
+test("card picker: names in the language of the profile, read when the picker opens", () => {
+  const { box } = freshCards({ lang: "" });
+  const card = box.window.customCards.find((c) => c.type === "plenitude-consumption-card");
+  assert.equal(card.name, "Plenitude: consumption"); // nothing known yet: the browser's language
+  box.document.documentElement.lang = "it"; // set by the frontend once its translations are loaded
+  assert.equal(card.name, "Plenitude: consumi");
+  assert.equal(freshCards({ lang: "", selected: "it" }).box.window.customCards[0].name, "Plenitude: consumi");
 });
