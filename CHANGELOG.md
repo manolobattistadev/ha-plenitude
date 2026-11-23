@@ -4,6 +4,21 @@ All notable changes to this project are listed here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [semantic versioning](https://semver.org/).
 
+## [0.5.1] - 2026-11-23
+
+### Fixed
+- Cost of the consumption at 0 in the cards (the energy line of the cost breakdown negative, the total equal to the
+  periodic costs) after a change of prices or costs. Two causes, both reproduced in the tests with the libraries of
+  Home Assistant 2026.9.4:
+  - the cost history was rewritten only after the requests to the customer area: when one of them failed, the
+    cost statistic stayed with the old prices, or empty if there was no price before. It is now rewritten first,
+    from the stored consumption, without the network; the old cost is cleared and the new one queued with nothing
+    to wait in between, so that a reload of the entry cannot stop it halfway;
+  - the cards read the cost statistic, which is empty for a moment while it is rewritten, and kept what they read.
+    They now compute the cost of the consumption from the kWh of each band and the price of its hours given by the
+    integration: the same numbers, always consistent with the bands in euro.
+- The data version for the cards is a unique identifier instead of a time.
+
 ## [0.5.0] - 2026-11-23
 
 ### Added

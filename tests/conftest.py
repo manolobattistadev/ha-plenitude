@@ -15,6 +15,7 @@ from custom_components.plenitude.api import (
     DayConsumption,
     MonthConsumption,
     PlenitudeBadRequest,
+    PlenitudeError,
     PlenitudeSessionExpired,
     Reading,
     Supply,
@@ -53,6 +54,7 @@ class FakePortal:
     account_requests: int = 0
     renewals: int = 0
     expire_next: int = 0  # the next requests of days find the portal session over (HTTP 406)
+    down: bool = False  # the customer area cannot be reached
 
     def available(self, day: date) -> bool:
         return day in self.days and day not in self.hidden
@@ -103,6 +105,8 @@ class FakeClient:
 
     async def get_day(self, account, supply, day: date) -> DayConsumption:
         self.portal.day_requests.append(day)
+        if self.portal.down:
+            raise PlenitudeError("customer area not reachable")
         if self.portal.expire_next:
             self.portal.expire_next -= 1
             raise PlenitudeSessionExpired("/api/profilo-energetico-services/…/analysis/consumptions: HTTP 406")

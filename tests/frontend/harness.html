@@ -81,7 +81,8 @@
     const key = id.slice(P.length + 1);
     const v = kwh(t);
     if (key === "consumo") return v;
-    if (key === "costo") return v * HOUR_PRICES[band(t)];
+    // ?nocost: the cost statistic has no rows (being rewritten, or never written), as on a server on 2026-11-23.
+    if (key === "costo") return location.search.includes("nocost") ? null : v * HOUR_PRICES[band(t)];
     if (key === "f1" || key === "f2" || key === "f3") return band(t) === key ? v : 0;
     return null;
   }

@@ -6,8 +6,10 @@
  *   custom:plenitude-billing-card      current billing period (two months from a chosen day): kWh and cost
  *                                      so far, bands, estimate at the end of the period
  *
- * Costs: the cost statistic is kWh x (price of the band + costs per kWh), with the percentage costs (VAT) applied
- * to them. The periodic costs entered in the integration (monthly, two-monthly, yearly, per kW per month) count in
+ * Costs: the cost of the consumption is kWh x (price of the band + costs per kWh), with the percentage costs (VAT)
+ * applied to them: the kWh of each band times the price of an hour of that band given by the integration. The
+ * integration writes the same numbers in its cost statistic, for the Energy dashboard; the cards do not read it,
+ * because it is empty for a moment whenever prices or costs change (it is rewritten) and a card would keep that. The periodic costs entered in the integration (monthly, two-monthly, yearly, per kW per month) count in
  * full, as entered: every month carries 1/12 of their euro per year, split among its days; a billing period
  * carries its months in full, also before it is over (9 euro a month: 18 euro in a two-month bill). The
  * percentages apply to them too, except to the costs marked as excluded (the TV licence fee pays no VAT), and
@@ -24,7 +26,7 @@
  * and hand-drawn SVG. Text that comes from outside (category names) is always set with textContent.
  */
 
-const CARD_VERSION = "0.5.0";
+const CARD_VERSION = "0.5.1";
 
 // ------------------------------------------------------------------------------------------- language
 
@@ -243,6 +245,15 @@ const perKwhExtra = (entry, exempt = false) =>
   perKwhCosts(entry).filter((c) => Boolean(c.exempt) === exempt).reduce((a, c) => a + Number(c.amount), 0);
 /** Sum of the percentages as a fraction (VAT at 10 %: 0.10). */
 const percentRate = (entry) => percentCosts(entry).reduce((a, c) => a + Number(c.amount), 0) / 100;
+/**
+ * Euro per kWh of an hour in ``band`` (energy, costs per kWh, percentages), as the integration computes it; from
+ * the prices and the costs if it does not say.
+ */
+const bandHourPrice = (entry, band) =>
+  entry.hour_prices?.[band] ??
+  ((entry.prices?.[band] ?? 0) + perKwhExtra(entry)) * (1 + percentRate(entry)) + perKwhExtra(entry, true);
+/** Cost of the consumption as parts of a series: the kWh of each band times the price of its hours. */
+const costParts = (entry) => ["f1", "f2", "f3"].map((band) => ({ id: entry.statistics[band], factor: bandHourPrice(entry, band) }));
 /** What the percentages add to a cost: 1 + their sum, 1 for the costs excluded from them. */
 const percentFactor = (entry, cost) => (cost.exempt ? 1 : 1 + percentRate(entry));
 
@@ -292,9 +303,9 @@ function billingFixed(entry, period, months, items = periodicCosts(entry), withP
 
 /**
  * Cost of a period item by item, as in the bill: the energy, every cost without the percentages, then every
- * percentage on the base it applies to (energy, costs per kWh and periodic costs not excluded). ``usageEur`` comes
- * from the cost statistic, which has the percentages in it: kWh x ((price + taxed per kWh) x (1 + rate) + exempt
- * per kWh), so the energy is taken back out of it. The rows add up to ``usageEur + fixed``.
+ * percentage on the base it applies to (energy, costs per kWh and periodic costs not excluded). ``usageEur`` has
+ * the percentages in it, like the price of the hours: kWh x ((price + taxed per kWh) x (1 + rate) + exempt per kWh),
+ * so the energy is taken back out of it. The rows add up to ``usageEur + fixed``.
  */
 function costBreakdown(entry, usageEur, kwh, fixedOf) {
   const rate = percentRate(entry);
@@ -403,7 +414,7 @@ const pickEntry = (info, entryId) =>
 /** Every statistic of a supply: what is read for a period serves all the views and units of the cards. */
 function statisticIds(entry) {
   const s = entry.statistics;
-  return [s.consumo, s.f1, s.f2, s.f3, s.costo, ...(entry.categories || []).map((c) => c.statistic_id)].filter(Boolean);
+  return [s.consumo, s.f1, s.f2, s.f3, ...(entry.categories || []).map((c) => c.statistic_id)].filter(Boolean);
 }
 
 const STORE_PREFIX = "plenitude-cards:";
@@ -503,15 +514,11 @@ async function fetchChanges(hass, ids, range) {
  */
 function buildSeries(entry, view, unit, lang) {
   const s = entry.statistics;
-  const price = entry.prices || {};
   if (view === "categories") {
     return entry.categories.map((c, i) => ({ key: c.key, name: categoryName(lang, c), color: i, parts: [{ id: c.statistic_id, factor: 1 }] }));
   }
   if (view === "bands") {
-    // Euro per kWh of each band as in the cost statistic (with the costs per kWh and the percentages).
-    const hourPrice = (band) =>
-      entry.hour_prices?.[band] ?? ((price[band] ?? 0) + perKwhExtra(entry)) * (1 + percentRate(entry)) + perKwhExtra(entry, true);
-    const factor = (band) => (unit === "eur" ? hourPrice(band) : 1);
+    const factor = (band) => (unit === "eur" ? bandHourPrice(entry, band) : 1);
     if (entry.price_mode === "two") {
       return [
         { key: "f1", name: "F1", color: 0, parts: [{ id: s.f1, factor: factor("f1") }] },
@@ -525,9 +532,12 @@ function buildSeries(entry, view, unit, lang) {
       parts: [{ id: s[band], factor: factor(band) }],
     }));
   }
-  if (unit === "eur") return [{ key: "cost", name: tr(lang, "cost"), color: 0, parts: [{ id: s.costo, factor: 1 }] }];
+  if (unit === "eur") return [{ key: "cost", name: tr(lang, "cost"), color: 0, parts: costParts(entry) }];
   return [{ key: "total", name: tr(lang, "consumption"), color: 0, parts: [{ id: s.consumo, factor: 1 }] }];
 }
+
+/** Cost of the consumption in each of ``count`` buckets (``values``, null without data) and in all (``total``). */
+const usageCost = (entry, changes, count) => seriesValues([{ parts: costParts(entry) }], changes, count)[0];
 
 function seriesValues(series, changes, count) {
   return series.map((serie) => {
@@ -972,7 +982,7 @@ class PlenitudeConsumptionCard extends PlenitudeBase {
     const hasAny = (id) => id && (changes[id] || []).some((v) => v !== null);
     const kwhTotal = sumOf(entry.statistics.consumo);
     const fixedTotal = this._data.fixedTotal || 0;
-    const eurTotal = entry.statistics.costo ? sumOf(entry.statistics.costo) + fixedTotal : null;
+    const eurTotal = entry.statistics.costo ? usageCost(entry, changes, range.buckets.length).total + fixedTotal : null;
 
     const periodButtons = el(
       "div",
@@ -1223,14 +1233,15 @@ class PlenitudeBillingCard extends PlenitudeBase {
     const kwhDaily = changes[s.consumo];
     const sum = sumValues;
     const kwh = sum(kwhDaily);
-    // Cost of the consumption so far (energy + costs per kWh, the cost statistic), plus the periodic costs of the
-    // whole period as entered: the bill charges them in full (split evenly among the days for the columns).
-    const usageEur = s.costo ? sum(changes[s.costo]) : null;
+    // Cost of the consumption so far (energy + costs per kWh + percentages, from the bands), plus the periodic costs
+    // of the whole period as entered: the bill charges them in full (split evenly among the days for the columns).
+    const usage = s.costo ? usageCost(entry, changes, range.buckets.length) : null;
+    const usageEur = usage ? usage.total : null;
     const fixedPeriod = billingFixed(entry, period, this._config.months);
     const fixedDaily = range.buckets.map(() => (fixedPeriod ? fixedPeriod / range.buckets.length : null));
     const eur = usageEur !== null ? usageEur + fixedPeriod : null;
     const costOfDay = (i) => {
-      const energy = s.costo ? changes[s.costo][i] : null;
+      const energy = usage ? usage.values[i] : null;
       return energy === null && fixedDaily[i] === null ? null : (energy || 0) + (fixedDaily[i] || 0);
     };
     const periodDays = range.buckets.length;

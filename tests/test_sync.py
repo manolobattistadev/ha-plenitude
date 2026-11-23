@@ -213,6 +213,31 @@ async def test_price_change_rebuilds_cost(recorder_mock, hass: HomeAssistant, fr
     assert await rows(hass, COST) == []
 
 
+@pytest.mark.parametrize("before", [{PRICE_MODE: "none"}, {PRICE_MODE: "single", "price": 0.2}])
+async def test_cost_follows_the_prices_without_the_customer_area(
+    recorder_mock, hass: HomeAssistant, freezer, fake_client: FakePortal, before: dict
+) -> None:
+    """New prices or costs rewrite the cost history at once, also when the customer area cannot be reached: the
+    history is local. Without a cost statistic before (no price), or with one of the old prices."""
+    freezer.move_to(datetime(2026, 11, 22, 12, tzinfo=ROME))
+    fake_client.days = days(date(2026, 11, 1), date(2026, 11, 20))
+    entry = await setup(hass, before)
+    version = entry.runtime_data.data_version
+    energy = await rows(hass, ENERGY)
+
+    fake_client.down = True  # 21/11 is still missing: the sync after the reload asks it and fails
+    hass.config_entries.async_update_entry(entry, options={PRICE_MODE: "single", "price": 0.4})
+    await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    await async_wait_recording_done(hass)
+
+    cost = await rows(hass, COST)
+    assert len(cost) == len(energy)
+    assert_consistent(cost)
+    assert cost[-1]["sum"] == pytest.approx(energy[-1]["sum"] * 0.4)
+    assert entry.runtime_data.data_version != version  # the cards read again
+
+
 async def test_info_for_the_cards(hass: HomeAssistant, hass_ws_client, fake_client: FakePortal) -> None:
     # Real time here: the access token of the websocket client expires 30 minutes after it is issued.
     last_day = datetime.now(ROME).date() - timedelta(days=2)

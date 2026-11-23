@@ -19,7 +19,7 @@ const sandbox = {
 };
 vm.createContext(sandbox);
 vm.runInContext(source, sandbox);
-const { billingPeriod, periodRange, buildSeries, seriesValues, fixedShares, billingFixed, costBreakdown, categoryName } = sandbox;
+const { billingPeriod, periodRange, buildSeries, seriesValues, fixedShares, billingFixed, costBreakdown, categoryName, statisticIds } = sandbox;
 
 const day = (y, m, d) => new Date(y, m - 1, d);
 const ymd = (date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
@@ -200,6 +200,15 @@ test("bands in euro: the price of an hour from the integration, with the percent
   // Older integration without hour_prices: the same formula as the cost statistic.
   const computed = seriesValues(buildSeries({ ...WITH_VAT, price_mode: "three" }, "bands", "eur", "it"), changes, 1);
   assert.ok(close(computed[0].values[0], (0.2 + 0.05) * 1.1 - 0.01));
+});
+
+test("the cost of the consumption comes from the bands, not from the cost statistic", () => {
+  // The cost statistic is empty while the integration rewrites it (new prices or costs): the cards do not read it.
+  const entry = { ...WITH_VAT, price_mode: "three", hour_prices: { f1: 0.5, f2: 0.4, f3: 0.3 } };
+  assert.ok(!statisticIds(entry).includes("e"));
+  const [cost] = seriesValues(buildSeries(entry, "total", "eur", "it"), { a: [2, null], b: [1, null], d: [0, null], e: [0, null] }, 2);
+  assert.ok(close(cost.values[0], 2 * 0.5 + 1 * 0.4));
+  assert.equal(cost.values[1], null); // no data, no cost
 });
 
 test("category names: the portal's in Italian, translated in English", () => {

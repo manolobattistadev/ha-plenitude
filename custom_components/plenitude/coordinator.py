@@ -38,6 +38,7 @@ from homeassistant.helpers.aiohttp_client import async_create_clientsession
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
+from homeassistant.util.ulid import ulid_now
 from homeassistant.util.unit_conversion import EnergyConverter
 
 from .api import (
@@ -475,7 +476,7 @@ class PlenitudeCoordinator(DataUpdateCoordinator[PlenitudeData]):
                 await get_instance(self.hass).async_block_till_done()
         except TimeoutError:
             _LOGGER.debug("Recorder still busy after 60 s: the cards may reload before the data are written")
-        self._state["data_version"] = dt_util.utcnow().isoformat()
+        self._state["data_version"] = ulid_now()  # unique also for two writes in the same instant
 
     # --------------------------------------------------------------------- sync
 
@@ -496,11 +497,15 @@ class PlenitudeCoordinator(DataUpdateCoordinator[PlenitudeData]):
     async def _sync(self) -> PlenitudeData:
         today = dt_util.now(ROME).date()
         yesterday = today - timedelta(days=1)
-        await self._ensure_supply(today)
         last = await self._recorder(get_last_statistics, 1, self.energy_id, True, {"sum"})
         # ``first_day`` is saved when the whole history is imported: without it, the first import was never
         # completed (the first results of an interrupted one may be in the recorder) and starts again.
         first_import = not last.get(self.energy_id) or not self._state.get("first_day")
+        if not first_import:
+            # New prices or costs: the cost history is rewritten from the stored consumption at once, before asking
+            # the customer area, which may not answer (before 0.5.1 a failed sync left the old cost, or none).
+            await self._maybe_rebuild_cost()
+        await self._ensure_supply(today)
 
         if first_import:
             if last.get(self.energy_id):
@@ -686,16 +691,22 @@ class PlenitudeCoordinator(DataUpdateCoordinator[PlenitudeData]):
             await self._rebuild_cost({})
             self._state["price_signature"] = signature
             await self._written()
+            await self._save()
 
     async def _rebuild_cost(self, recent: dict[datetime, float]) -> None:
         """Prices, costs per kWh or percentages changed: rewrite the whole cost history from the stored hourly
-        consumption."""
-        self._clear([self.cost_id])
+        consumption.
+
+        The consumption is read first: the old cost is cleared and the new one queued right after, with nothing to
+        wait in between, so that a reload of the entry (one per cost added) cannot stop it halfway.
+        """
         if not self.has_cost:
+            self._clear([self.cost_id])
             _LOGGER.info("Plenitude: no price and no additional cost, cost statistic removed")
             return
         stored = await self._stored_states(datetime(2000, 1, 1, tzinfo=UTC), {self.energy_id})
         energy = {**stored.get(self.energy_id, {}), **recent}
+        self._clear([self.cost_id])
         total = 0.0
         data: list[StatisticData] = []
         for moment, kwh in sorted(energy.items()):
