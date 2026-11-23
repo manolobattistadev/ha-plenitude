@@ -69,9 +69,9 @@ def assert_consistent(data: list[dict]) -> None:
         assert row["sum"] == pytest.approx(total, abs=1e-6)
 
 
-def cost(name: str, kind: str, amount: float) -> ConfigSubentryData:
+def cost(name: str, kind: str, amount: float, **extra) -> ConfigSubentryData:
     return {
-        "data": {"name": name, "kind": kind, "amount": amount},
+        "data": {"name": name, "kind": kind, "amount": amount, **extra},
         "subentry_type": "cost",
         "title": name,
         "unique_id": None,
@@ -217,7 +217,12 @@ async def test_info_for_the_cards(hass: HomeAssistant, hass_ws_client, fake_clie
     # Real time here: the access token of the websocket client expires 30 minutes after it is issued.
     last_day = datetime.now(ROME).date() - timedelta(days=2)
     fake_client.days = days(last_day - timedelta(days=19), last_day)
-    costs = (cost("Quota fissa", "monthly", 10), cost("Oneri", "per_kwh", 0.05))
+    costs = (
+        cost("Quota fissa", "monthly", 10),
+        cost("Oneri", "per_kwh", 0.05),
+        cost("Canone TV", "monthly", 9, exempt=True),
+        cost("IVA", "percent", 10),
+    )
     entry = await setup(hass, THREE_BANDS, costs)
     client = await hass_ws_client(hass)
     await client.send_json({"id": 1, "type": "plenitude/info"})
@@ -229,9 +234,13 @@ async def test_info_for_the_cards(hass: HomeAssistant, hass_ws_client, fake_clie
     assert info["last_day"] == last_day.isoformat()
     assert info["prices"] == {"f1": 0.30, "f2": 0.25, "f3": 0.20}
     assert info["costs"] == [
-        {"name": "Quota fissa", "kind": "monthly", "amount": 10.0, "yearly": 120.0},
-        {"name": "Oneri", "kind": "per_kwh", "amount": 0.05, "yearly": None},
+        {"name": "Quota fissa", "kind": "monthly", "amount": 10.0, "exempt": False, "yearly": 120.0},
+        {"name": "Oneri", "kind": "per_kwh", "amount": 0.05, "exempt": False, "yearly": None},
+        {"name": "Canone TV", "kind": "monthly", "amount": 9.0, "exempt": True, "yearly": 108.0},
+        {"name": "IVA", "kind": "percent", "amount": 10.0, "yearly": None},
     ]
+    # As in the cost statistic: (price + costs per kWh) x 1.10.
+    assert info["hour_prices"] == pytest.approx({"f1": 0.385, "f2": 0.33, "f3": 0.275})
     assert info["version"]  # set once the statistics are written
     assert info["statistics"] == {
         "consumo": ENERGY,
@@ -339,9 +348,10 @@ async def test_costs_per_kwh_follow_the_subentries(
         await async_wait_recording_done(hass)
 
     result = await hass.config_entries.subentries.async_init((entry.entry_id, "cost"), context={"source": "user"})
-    await hass.config_entries.subentries.async_configure(
-        result["flow_id"], {"name": "Oneri", "kind": "per_kwh", "amount": "0,05"}
+    result = await hass.config_entries.subentries.async_configure(
+        result["flow_id"], {"name": "Oneri", "kind": "per_kwh"}
     )
+    await hass.config_entries.subentries.async_configure(result["flow_id"], {"amount": "0,05"})
     await settle()
     energy = await rows(hass, ENERGY)
     cost = await rows(hass, COST)
@@ -359,11 +369,31 @@ async def test_costs_per_kwh_follow_the_subentries(
 
     (subentry_id,) = entry.subentries
     result = await entry.start_subentry_reconfigure_flow(hass, subentry_id)
-    await hass.config_entries.subentries.async_configure(
-        result["flow_id"], {"name": "Oneri", "kind": "per_kwh", "amount": "0.1"}
+    result = await hass.config_entries.subentries.async_configure(
+        result["flow_id"], {"name": "Oneri", "kind": "per_kwh"}
     )
+    await hass.config_entries.subentries.async_configure(result["flow_id"], {"amount": "0.1"})
     await settle()
     assert (await rows(hass, COST))[-1]["sum"] == pytest.approx(energy[-1]["sum"] * 0.3)
+
+    # A percentage (VAT at 10 %) applies to the price and to the costs per kWh not excluded from it.
+    result = await hass.config_entries.subentries.async_init((entry.entry_id, "cost"), context={"source": "user"})
+    result = await hass.config_entries.subentries.async_configure(result["flow_id"], {"name": "IVA", "kind": "percent"})
+    await hass.config_entries.subentries.async_configure(result["flow_id"], {"amount": "10"})
+    await settle()
+    assert (await rows(hass, COST))[-1]["sum"] == pytest.approx(energy[-1]["sum"] * 0.3 * 1.1)
+    state = sensor(hass, "costo_ultimo_giorno")
+    assert state is not None and float(state.state) == pytest.approx(round(24 * KWH_PER_HOUR * 0.33, 2))
+    result = await entry.start_subentry_reconfigure_flow(hass, subentry_id)
+    result = await hass.config_entries.subentries.async_configure(
+        result["flow_id"], {"name": "Oneri", "kind": "per_kwh"}
+    )
+    await hass.config_entries.subentries.async_configure(result["flow_id"], {"amount": "0.1", "exempt": True})
+    await settle()
+    assert (await rows(hass, COST))[-1]["sum"] == pytest.approx(energy[-1]["sum"] * (0.2 * 1.1 + 0.1))
+    iva = next(sid for sid, sub in entry.subentries.items() if sub.title == "IVA")
+    hass.config_entries.async_remove_subentry(entry, iva)
+    await settle()
 
     hass.config_entries.async_remove_subentry(entry, subentry_id)
     await settle()
@@ -553,8 +583,8 @@ async def test_cost_per_kw_suggests_the_power_of_the_contract(
     entry = await setup(hass, {PRICE_MODE: "none"})
     result = await hass.config_entries.subentries.async_init((entry.entry_id, "cost"), context={"source": "user"})
     result = await hass.config_entries.subentries.async_configure(
-        result["flow_id"], {"name": "Quota potenza", "kind": "per_kw_monthly", "amount": "1,716"}
+        result["flow_id"], {"name": "Quota potenza", "kind": "per_kw_monthly"}
     )
-    assert result["step_id"] == "power"
-    (power,) = result["data_schema"].schema
+    assert result["step_id"] == "per_kw"
+    power = next(key for key in result["data_schema"].schema if key == "power")
     assert power.description == {"suggested_value": "4.5"}

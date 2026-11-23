@@ -48,14 +48,17 @@
   const LAST_DAY = "2026-11-20";
   const LAST = new Date(2026, 10, 21).getTime();
   const PRICES = { f1: 0.31, f2: 0.27, f3: 0.22 };
-  // As plenitude/info sends them: ``yearly`` is euro per year (null for the costs per kWh).
+  // As plenitude/info sends them: ``yearly`` is euro per year (null for the costs per kWh and the percentages).
   const COSTS = [
-    { name: "Quota fissa", kind: "monthly", amount: 8.5, yearly: 102 },
-    { name: "Quota potenza", kind: "per_kw_monthly", amount: 1.85, power: 3, yearly: 66.6 },
-    { name: "Canone RAI", kind: "yearly", amount: 90, yearly: 90 },
-    { name: "Oneri di sistema", kind: "per_kwh", amount: 0.035, yearly: null },
+    { name: "Quota fissa", kind: "monthly", amount: 8.5, exempt: false, yearly: 102 },
+    { name: "Quota potenza", kind: "per_kw_monthly", amount: 1.85, power: 3, exempt: false, yearly: 66.6 },
+    { name: "Canone RAI", kind: "yearly", amount: 90, exempt: true, yearly: 90 },
+    { name: "Oneri di sistema", kind: "per_kwh", amount: 0.035, exempt: false, yearly: null },
+    { name: "IVA", kind: "percent", amount: 10, yearly: null },
   ];
   const EXTRA = 0.035; // sum of the costs per kWh, as in the cost statistic
+  const VAT = 1.1; // the percentage, on the energy and the costs per kWh
+  const HOUR_PRICES = Object.fromEntries(Object.entries(PRICES).map(([b, p]) => [b, (p + EXTRA) * VAT]));
   const CATS = ["comfort_ambientale", "standby", "lavare", "elettronica_luci", "refrigerare", "cucinare", "ricarica_elettrica", "altro"];
   const NAMES = ["Comfort Ambientale (HVAC)", "Standby", "Lavare", "Elettronica e luci", "Refrigerare", "Cucinare", "Ricarica elettrica", "Altro"];
   const SHARES = [0.22, 0.12, 0.1, 0.16, 0.14, 0.1, 0.06, 0.1];
@@ -78,7 +81,7 @@
     const key = id.slice(P.length + 1);
     const v = kwh(t);
     if (key === "consumo") return v;
-    if (key === "costo") return v * (PRICES[band(t)] + EXTRA);
+    if (key === "costo") return v * HOUR_PRICES[band(t)];
     if (key === "f1" || key === "f2" || key === "f3") return band(t) === key ? v : 0;
     return null;
   }
@@ -117,7 +120,7 @@
           requests.info += 1;
           return { entries: [{
             entry_id: "demo", title: "Plenitude luce", version: "harness", first_day: "2026-01-04", last_day: LAST_DAY, price_mode: "three", prices: PRICES,
-            costs: COSTS, currency: "EUR",
+            hour_prices: HOUR_PRICES, costs: COSTS, currency: "EUR",
             statistics: { consumo: P + "_consumo", f1: P + "_f1", f2: P + "_f2", f3: P + "_f3", costo: P + "_costo" },
             categories: CATS.map((c, i) => ({ key: c, name: NAMES[i], statistic_id: P + "_cat_" + c })),
           }] };

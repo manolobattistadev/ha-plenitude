@@ -88,7 +88,8 @@
         "bimonthly": "Every two months",
         "yearly": "Yearly",
         "per_kw_monthly": "Per kW per month",
-        "per_kwh": "Per kWh"
+        "per_kwh": "Per kWh",
+        "percent": "Percentage (VAT, for example)"
       }
     }
   },
@@ -135,39 +136,61 @@
       "step": {
         "user": {
           "title": "Add a cost",
-          "description": "A cost of your contract besides the price of the energy. Monthly, two-monthly, yearly and per kW per month costs are spread over the days in the cards; costs per kWh are added to the price of every hour, also in the Energy dashboard.",
+          "description": "A cost of your contract besides the price of the energy. Monthly, two-monthly, yearly and per kW per month costs count in full in the cards; costs per kWh and percentages (VAT, for example) are in the cost of every hour, also in the Energy dashboard. The amount comes in the next step.",
           "data": {
             "name": "Name",
-            "kind": "Type",
-            "amount": "Amount"
+            "kind": "Type"
           },
           "data_description": {
-            "name": "Any text, for example: TV licence, fixed fee, power fee, system charges.",
-            "kind": "How the amount is charged: every month, every two months, every year, every month for each kW of the contract power (power fee), or for each kWh consumed.",
-            "amount": "Euro, with a comma or a point for the decimals (at most 6): euro per kWh for the costs per kWh, euro per kW for the costs per kW per month. Use a negative amount for a discount."
+            "name": "Any text, for example: TV licence, fixed fee, power fee, system charges, VAT.",
+            "kind": "How it is charged: every month, every two months, every year, every month for each kW of the contract power (power fee), for each kWh consumed, or as a percentage of the rest of the bill (VAT, for example)."
           }
         },
         "reconfigure": {
           "title": "Edit the cost",
           "data": {
             "name": "Name",
-            "kind": "Type",
-            "amount": "Amount"
+            "kind": "Type"
           },
           "data_description": {
-            "name": "Any text, for example: TV licence, fixed fee, power fee, system charges.",
-            "kind": "How the amount is charged: every month, every two months, every year, every month for each kW of the contract power (power fee), or for each kWh consumed.",
-            "amount": "Euro, with a comma or a point for the decimals (at most 6): euro per kWh for the costs per kWh, euro per kW for the costs per kW per month. Use a negative amount for a discount."
+            "name": "Any text, for example: TV licence, fixed fee, power fee, system charges, VAT.",
+            "kind": "How it is charged: every month, every two months, every year, every month for each kW of the contract power (power fee), for each kWh consumed, or as a percentage of the rest of the bill (VAT, for example)."
           }
         },
-        "power": {
-          "title": "Contract power",
-          "description": "**{name}** is charged every month for each kW of the contract power: the bill shows it as committed power (potenza impegnata). The customer area's value is suggested when it is known.",
+        "amount": {
+          "title": "Amount",
+          "description": "Amount of **{name}**.",
           "data": {
-            "power": "Power"
+            "amount": "Amount",
+            "exempt": "Excluded from the percentages"
           },
           "data_description": {
-            "power": "kW, for example 3, 4,5 or 6."
+            "amount": "Euro (euro per kWh for the costs per kWh), with a comma or a point for the decimals (at most 6). Use a negative amount for a discount.",
+            "exempt": "Turn it on if the percentages do not apply to this cost: for example the TV licence, which pays no VAT in the bill."
+          }
+        },
+        "per_kw": {
+          "title": "Amount per kW and power",
+          "description": "**{name}** is charged every month for each kW of the contract power: the bill shows it as committed power (potenza impegnata). The customer area's value is suggested when it is known.",
+          "data": {
+            "amount": "Amount per kW",
+            "power": "Power",
+            "exempt": "Excluded from the percentages"
+          },
+          "data_description": {
+            "amount": "Euro per kW per month, with a comma or a point for the decimals (at most 6).",
+            "power": "kW, for example 3, 4,5 or 6.",
+            "exempt": "Turn it on if the percentages do not apply to this cost: for example the TV licence, which pays no VAT in the bill."
+          }
+        },
+        "percent": {
+          "title": "Percentage",
+          "description": "**{name}** is a percentage of the energy price and of every cost not excluded, for example VAT at 10%. Percentages do not apply to each other. Excise duties are an amount per kWh in the bill: enter them as a cost per kWh, so that the percentage applies to them too.",
+          "data": {
+            "amount": "Percentage"
+          },
+          "data_description": {
+            "amount": "For example 10 for 10%, with a comma or a point for the decimals (at most 6). Negative for a discount."
           }
         }
       },
@@ -176,7 +199,8 @@
         "invalid_number": "Enter a number, with a comma or a point for the decimals (for example 9,15 or 9.15), without thousands separators.",
         "too_many_decimals": "At most 6 decimals.",
         "out_of_range": "The amount must be between -100000 and 100000 euro.",
-        "invalid_power": "Enter a power between 0.1 and 999 kW, with a comma or a point for the decimals (at most 6)."
+        "invalid_power": "Enter a power between 0.1 and 999 kW, with a comma or a point for the decimals (at most 6).",
+        "invalid_percent": "Enter a percentage between -100 and 100, with a comma or a point for the decimals (at most 6)."
       },
       "abort": {
         "reconfigure_successful": "Cost updated."

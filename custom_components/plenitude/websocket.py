@@ -16,6 +16,7 @@ from homeassistant.core import HomeAssistant, callback
 from .bands import BANDS, PRICE_MODE, PRICE_NONE, price_of
 from .const import CATEGORY_ORDER, DOMAIN, STAT_COST, STAT_ENERGY
 from .coordinator import CURRENCY, PlenitudeCoordinator
+from .costs import hour_price
 
 
 def entry_info(entry_id: str, title: str, coordinator: PlenitudeCoordinator) -> dict[str, Any]:
@@ -31,8 +32,15 @@ def entry_info(entry_id: str, title: str, coordinator: PlenitudeCoordinator) -> 
         "price_mode": options.get(PRICE_MODE, PRICE_NONE),
         # Energy price of each band (0 without a price of the energy); None when there is no cost at all.
         "prices": {name: price_of(name, options) or 0.0 for name in BANDS} if coordinator.has_cost else None,
-        # Additional costs: the cards add the costs per kWh to the band prices and spread the periodic ones
-        # (``yearly``: euro per year, None for the costs per kWh).
+        # Price of an hour of each band as in the cost statistic: energy and costs per kWh, with the percentages.
+        "hour_prices": (
+            {name: hour_price(name, options, coordinator.cost_items) for name in BANDS}
+            if coordinator.has_cost
+            else None
+        ),
+        # Additional costs: the cards count the periodic ones in full (``yearly``: euro per year, without the
+        # percentages; None for the costs per kWh and for the percentages) and apply the percentages to those
+        # that are not ``exempt``.
         "costs": [{**item.as_dict(), "yearly": item.yearly} for item in coordinator.cost_items],
         "currency": CURRENCY,
         "statistics": {

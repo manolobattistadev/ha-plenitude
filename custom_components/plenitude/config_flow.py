@@ -20,6 +20,7 @@ from homeassistant.const import CONF_EMAIL, CONF_PASSWORD
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.aiohttp_client import async_create_clientsession
 from homeassistant.helpers.selector import (
+    BooleanSelector,
     SelectOptionDict,
     SelectSelector,
     SelectSelectorConfig,
@@ -36,6 +37,7 @@ from .const import VERSION as INTEGRATION_VERSION
 from .coordinator import PlenitudeConfigEntry
 from .costs import (
     COST_AMOUNT,
+    COST_EXEMPT,
     COST_KIND,
     COST_KINDS,
     COST_NAME,
@@ -43,6 +45,8 @@ from .costs import (
     COST_SUBENTRY,
     KIND_MONTHLY,
     KIND_PER_KW_MONTHLY,
+    KIND_PER_KWH,
+    KIND_PERCENT,
     CostItem,
     format_number,
     parse_number,
@@ -68,19 +72,29 @@ PRICE_SELECTOR = TextSelector(TextSelectorConfig(suffix="€/kWh"))
 PRICE_RANGE = (0.0, 10.0)
 AMOUNT_RANGE = (-100000.0, 100000.0)  # negative for discounts and bonuses
 POWER_RANGE = (0.1, 999.0)
-# One form for every kind of cost: the unit stays "€" and the description says "per kWh" or "per kW" where it
-# applies; the costs per kW per month ask the power in a second step.
+PERCENT_RANGE = (-100.0, 100.0)
+# A cost in two steps: name and kind, then the amount in the unit of the kind (euro, euro per kWh, euro per kW and
+# the power, percent) and, for everything but the percentages, whether the percentages apply to it.
 COST_SCHEMA = vol.Schema(
     {
         vol.Required(COST_NAME): TextSelector(),
         vol.Required(COST_KIND): SelectSelector(
             SelectSelectorConfig(options=list(COST_KINDS), mode=SelectSelectorMode.DROPDOWN, translation_key=COST_KIND)
         ),
-        vol.Required(COST_AMOUNT): TextSelector(TextSelectorConfig(suffix="€")),
     }
 )
+UNITS = {KIND_PER_KWH: "€/kWh", KIND_PER_KW_MONTHLY: "€/kW", KIND_PERCENT: "%"}
+# Second step of each kind: its own texts (``step.<id>`` in the translations).
+AMOUNT_STEPS = {KIND_PER_KW_MONTHLY: "per_kw", KIND_PERCENT: "percent"}
 
-POWER_SCHEMA = vol.Schema({vol.Required(COST_POWER): TextSelector(TextSelectorConfig(suffix="kW"))})
+
+def _amount_schema(kind: str) -> vol.Schema:
+    fields: dict[Any, Any] = {vol.Required(COST_AMOUNT): TextSelector(TextSelectorConfig(suffix=UNITS.get(kind, "€")))}
+    if kind == KIND_PER_KW_MONTHLY:
+        fields[vol.Required(COST_POWER)] = TextSelector(TextSelectorConfig(suffix="kW"))
+    if kind != KIND_PERCENT:
+        fields[vol.Required(COST_EXEMPT, default=False)] = BooleanSelector()
+    return vol.Schema(fields)
 
 
 async def _electric_supplies(hass: HomeAssistant, email: str, password: str) -> list[Supply]:
@@ -272,73 +286,94 @@ class PlenitudeOptionsFlow(OptionsFlowWithReload):
 
 
 class CostSubentryFlow(ConfigSubentryFlow):
-    """An additional cost: free name, kind (monthly, two-monthly, yearly, per kW per month, per kWh) and amount in
-    euro; for the costs per kW per month, the power of the contract in a second step.
+    """An additional cost: free name and kind (monthly, two-monthly, yearly, per kW per month, per kWh, percentage),
+    then the amount; the power of the contract for the costs per kW per month; whether the percentages apply.
 
     Home Assistant lists the costs under the entry, with buttons to add, edit and delete them. The entry is
-    reloaded when they change (see ``__init__``), so that the cost history follows the costs per kWh.
+    reloaded when they change (see ``__init__``), so that the cost history follows the costs per kWh and the
+    percentages.
     """
 
     def __init__(self) -> None:
-        self._cost: CostItem | None = None
+        self._name = ""
+        self._kind = KIND_MONTHLY
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> SubentryFlowResult:
-        return await self._form("user", user_input)
+        return await self._first("user", user_input)
 
     async def async_step_reconfigure(self, user_input: dict[str, Any] | None = None) -> SubentryFlowResult:
-        return await self._form("reconfigure", user_input)
+        return await self._first("reconfigure", user_input)
 
     def _editing(self) -> dict[str, Any]:
         """Data of the cost being edited, empty for a new one."""
         return dict(self._get_reconfigure_subentry().data) if self.source == "reconfigure" else {}
 
-    def _shown(self, data: dict[str, Any]) -> dict[str, Any]:
-        """Stored numbers as the form shows them (decimal comma in Italian)."""
-        lang = self.hass.config.language
-        return {
-            key: format_number(value, lang) if key in (COST_AMOUNT, COST_POWER) and value is not None else value
-            for key, value in data.items()
-        }
-
-    async def _form(self, step_id: str, user_input: dict[str, Any] | None) -> SubentryFlowResult:
+    async def _first(self, step_id: str, user_input: dict[str, Any] | None) -> SubentryFlowResult:
+        """Name and kind."""
         errors: dict[str, str] = {}
         if user_input is not None:
-            name = str(user_input[COST_NAME]).strip()
-            amount, error = parse_number(user_input.get(COST_AMOUNT), *AMOUNT_RANGE)
-            if not name:
-                errors[COST_NAME] = "empty_name"
-            if amount is None or error:
-                errors[COST_AMOUNT] = error or "invalid_number"
-            if amount is not None and not errors:
-                self._cost = CostItem(name=name, kind=user_input[COST_KIND], amount=amount)
-                if self._cost.kind == KIND_PER_KW_MONTHLY:
-                    return await self.async_step_power()
-                return self._save(self._cost)
-        suggested = user_input or self._shown(self._editing()) or {COST_KIND: KIND_MONTHLY}
+            self._name = str(user_input[COST_NAME]).strip()
+            self._kind = user_input[COST_KIND]
+            if self._name:
+                return await self._amount(None)
+            errors[COST_NAME] = "empty_name"
+        editing = self._editing()
+        suggested = (
+            user_input or {k: editing[k] for k in (COST_NAME, COST_KIND) if k in editing} or {COST_KIND: KIND_MONTHLY}
+        )
         return self.async_show_form(
             step_id=step_id, data_schema=self.add_suggested_values_to_schema(COST_SCHEMA, suggested), errors=errors
         )
 
-    async def async_step_power(self, user_input: dict[str, Any] | None = None) -> SubentryFlowResult:
-        """Power of the contract for a cost per kW per month: the one already entered, or the customer area's."""
-        assert self._cost is not None
+    async def async_step_amount(self, user_input: dict[str, Any] | None = None) -> SubentryFlowResult:
+        return await self._amount(user_input)
+
+    async def async_step_per_kw(self, user_input: dict[str, Any] | None = None) -> SubentryFlowResult:
+        return await self._amount(user_input)
+
+    async def async_step_percent(self, user_input: dict[str, Any] | None = None) -> SubentryFlowResult:
+        return await self._amount(user_input)
+
+    async def _amount(self, user_input: dict[str, Any] | None) -> SubentryFlowResult:
+        """Amount in the unit of the kind, the power for the costs per kW, the exemption from the percentages."""
+        kind = self._kind
         errors: dict[str, str] = {}
         if user_input is not None:
-            power, error = parse_number(user_input.get(COST_POWER), *POWER_RANGE)
-            if power is None or error:
-                errors[COST_POWER] = "invalid_power"
+            if kind == KIND_PERCENT:
+                amount, error = parse_number(user_input.get(COST_AMOUNT), *PERCENT_RANGE)
+                error = error and "invalid_percent"
             else:
-                return self._save(
-                    CostItem(name=self._cost.name, kind=self._cost.kind, amount=self._cost.amount, power=power)
-                )
-        known = self._editing().get(COST_POWER) or self._portal_power()
-        suggested = user_input or ({COST_POWER: format_number(known, self.hass.config.language)} if known else {})
+                amount, error = parse_number(user_input.get(COST_AMOUNT), *AMOUNT_RANGE)
+            if error:
+                errors[COST_AMOUNT] = error
+            power = None
+            if kind == KIND_PER_KW_MONTHLY:
+                power, power_error = parse_number(user_input.get(COST_POWER), *POWER_RANGE)
+                if power_error:
+                    errors[COST_POWER] = "invalid_power"
+            if amount is not None and not errors:
+                exempt = bool(user_input.get(COST_EXEMPT, False)) and kind != KIND_PERCENT
+                return self._save(CostItem(name=self._name, kind=kind, amount=amount, power=power, exempt=exempt))
         return self.async_show_form(
-            step_id="power",
-            data_schema=self.add_suggested_values_to_schema(POWER_SCHEMA, suggested),
-            description_placeholders={"name": self._cost.name},
+            step_id=AMOUNT_STEPS.get(kind, "amount"),
+            data_schema=self.add_suggested_values_to_schema(_amount_schema(kind), user_input or self._known()),
+            description_placeholders={"name": self._name},
             errors=errors,
         )
+
+    def _known(self) -> dict[str, Any]:
+        """What the second step proposes: the values of the cost being edited (the amount only if its unit is the
+        same), and for the costs per kW the power of the customer area when none was entered."""
+        editing = self._editing()
+        lang = self.hass.config.language
+        known: dict[str, Any] = {}
+        if editing and UNITS.get(editing[COST_KIND], "€") == UNITS.get(self._kind, "€"):
+            known[COST_AMOUNT] = format_number(float(editing[COST_AMOUNT]), lang)
+        if self._kind == KIND_PER_KW_MONTHLY and (power := editing.get(COST_POWER) or self._portal_power()):
+            known[COST_POWER] = format_number(float(power), lang)
+        if self._kind != KIND_PERCENT:
+            known[COST_EXEMPT] = bool(editing.get(COST_EXEMPT, False))
+        return known
 
     def _portal_power(self) -> float | None:
         coordinator = getattr(self._get_entry(), "runtime_data", None)

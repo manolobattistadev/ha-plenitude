@@ -14,7 +14,8 @@ A Home Assistant integration that brings the electricity consumption of your
 - the same consumption split by **ARERA time band** (F1, F2, F3);
 - the **estimated categories** of the customer area (heating and cooling, washing, cooking…), day by day;
 - the **cost**, from the prices you enter (single price, two or three bands) plus **as many other costs as you
-  want** (monthly, two-monthly, yearly or per kWh: TV licence, fixed fee, system charges…);
+  want** (monthly, two-monthly, yearly, per kW, per kWh or a percentage: TV licence, fixed fee, power fee,
+  system charges, VAT…);
 - two **dashboard cards**: a consumption chart with a period of your choice, and the **current bill** (kWh and
   euro of the billing period so far, with an estimate at the end of the period).
 
@@ -82,22 +83,26 @@ Plenitude does not expose the price of your offer, so the cost is computed from 
 | Two bands | F1 and F23 (F2 + F3) |
 | Three bands | F1, F2 and F3 |
 
-**Other costs.** In the same page select **Add cost**, as many times as you need. Each cost has:
-- **Name**: free text, for example TV licence, fixed fee, power fee, system charges;
-- **Type**: monthly, every two months, yearly, per kW per month or per kWh;
-- **Amount**: in euro (euro per kWh for the costs per kWh, euro per kW for the costs per kW per month), with a
-  comma or a point for the decimals (`9,15` or `9.15`), at most 6 decimals, no thousands separators. Use a
-  negative amount for a discount. Prices follow the same rule.
+**Other costs.** In the same page select **Add cost**, as many times as you need. First the cost's:
+- **Name**: free text, for example TV licence, fixed fee, power fee, system charges, VAT;
+- **Type**: monthly, every two months, yearly, per kW per month, per kWh or percentage.
+
+Then, in the unit of the type:
+- **Amount**: euro, euro per kWh, euro per kW or percent, with a comma or a point for the decimals (`9,15` or
+  `9.15`), at most 6 decimals, no thousands separators. Use a negative amount for a discount. Prices follow the
+  same rule.
 - **Power**, only for the costs per kW per month (the power fee of the bill, *quota potenza*): the power of the
   contract in kW, as in the bill (*potenza impegnata*). The value of the customer area is suggested when it is
   known.
+- **Excluded from the percentages**, for every type but the percentages: turn it on for a cost that pays no VAT,
+  such as the TV licence.
 
 The costs are listed under the integration, where you can edit or delete them.
 
 How they are counted:
 - **Per kWh** costs are added to the price of every hour: they are in the cost statistic, in the Energy dashboard,
-  in the sensor and in the cards. When prices or costs per kWh change, the cost of the whole history is
-  recomputed.
+  in the sensor and in the cards. When prices, costs per kWh or percentages change, the cost of the whole history
+  is recomputed.
 - **Monthly, two-monthly, yearly and per kW per month** costs do not depend on the hours, so they are **not** in
   the cost statistic nor in the Energy dashboard. The cards count them **in full, as entered**: every month
   carries 1/12 of their euro a year (amount × 12 for monthly, × 6 for two-monthly, × 1 for yearly, × power × 12
@@ -105,10 +110,15 @@ How they are counted:
   of the last one. A month shows its whole amount also while it is not over. The current bill card counts all
   the months of the period, also before it ends (a TV licence of 9 euro a month is 18 euro in a two-month bill),
   and lists every cost.
+- **Percentages** (VAT, for example) apply to the price of the energy and to every other cost not excluded from
+  them: to the hours in the cost statistic, the Energy dashboard and the sensor, to the periodic costs in the
+  cards. The current bill card shows each one on its own line. Several percentages add up and do not apply to each
+  other (10 % and 2 % are 12 %).
 
 **Getting close to the bill.** Use the energy price of your offer as the price, then add the other lines of a bill
-as costs: transport, system charges and excise duty per kWh; fixed fee and TV licence as periodic costs; the power
-fee as a cost per kW per month. Include VAT in every amount.
+as costs, without VAT: transport, system charges and excise duty per kWh; fixed fee and TV licence as periodic
+costs; the power fee as a cost per kW per month. Then add VAT as a percentage (10 % for homes) and exclude the TV
+licence from it.
 
 ## What you get
 
@@ -120,7 +130,7 @@ The integration imports long-term statistics with source `plenitude`. In the ide
 |---|---|---|
 | `<p>_consumo` | kWh | measured consumption, hour by hour |
 | `<p>_f1`, `<p>_f2`, `<p>_f3` | kWh | the same consumption split by ARERA band (0 in the hours of the other bands) |
-| `<p>_costo` | EUR | kWh × (price of the band + costs per kWh), with a price or a cost (periodic costs excluded) |
+| `<p>_costo` | EUR | kWh × (price of the band + costs per kWh), with the percentages; with a price or a cost (periodic costs excluded) |
 | `<p>_cat_<category>` | kWh | the **estimated** split of the customer area, one value per day |
 
 Categories: `comfort_ambientale` (heating and cooling), `standby`, `lavare` (washing), `elettronica_luci`
@@ -135,7 +145,7 @@ or *Plenitude luce consumo*.
 |---|---|
 | Last day available | the most recent day with data |
 | Consumption of the last day | kWh of that day |
-| Consumption cost of the last day | euro of that day: energy and costs per kWh, no periodic costs |
+| Consumption cost of the last day | euro of that day: energy and costs per kWh with the percentages, no periodic costs |
 
 They show how far the import has got. They have no `state_class` on purpose: the history is in the statistics,
 with the right dates.
@@ -174,14 +184,14 @@ unit: kwh          # kwh | eur
 ```
 
 - **Categories** are daily estimates: they are not available in the day view, and only in kWh.
-- **In euro**, the periodic costs (monthly, two-monthly, yearly, per kW per month) appear as the gray segment at
-  the bottom of the columns.
+- **In euro**, the periodic costs (monthly, two-monthly, yearly, per kW per month), with their percentages, appear as
+  the gray segment at the bottom of the columns.
 
 ### Current bill
 Consumption and cost from the start of the current billing period to the last day with data. It also shows:
 - the split by band;
 - the progress through the period;
-- the cost breakdown: energy, then every cost you entered;
+- the cost breakdown: energy, then every cost you entered, then every percentage;
 - an estimate at the end of the period (average of the days with data × length of the period, plus the periodic
   costs of the whole period);
 - the columns day by day.
@@ -277,7 +287,7 @@ To report a vulnerability, see [SECURITY.md](SECURITY.md).
   missing, open `/plenitude_static/plenitude-cards.js` on your Home Assistant: it must show the code of the cards
   with the version at the top. Do not add the cards as dashboard resources: the integration loads them.
 - **The cost differs from the bill.** See [Prices and costs](#prices-and-costs): enter every line of the bill as a
-  cost, VAT included. Bills may also contain adjustments and estimated readings.
+  cost, without VAT, and VAT as a percentage. Bills may also contain adjustments and estimated readings.
 
 ## Removal
 1. **Settings → Devices & services → Eni Plenitude → ⋮ → Delete.**
@@ -290,8 +300,8 @@ To report a vulnerability, see [SECURITY.md](SECURITY.md).
 - Categories are estimates of Plenitude and come only day by day.
 - The monthly values by band of the customer area are not used: they do not match calendar months (they look
   like reading or billing periods).
-- The cost is an estimate from your prices: bills also contain taxes, adjustments and estimated readings that the
-  integration cannot know.
+- The cost is an estimate from the prices, costs and percentages you enter: bills also contain adjustments and
+  estimated readings that the integration cannot know.
 - Electricity only; gas is not supported yet.
 
 ## Development

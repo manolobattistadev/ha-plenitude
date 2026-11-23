@@ -1,4 +1,5 @@
-"""Sensors: the last day with data, its consumption and its cost (energy and costs per kWh, no periodic costs).
+"""Sensors: the last day with data, its consumption and its cost (energy, costs per kWh and percentages on them, no
+periodic costs).
 
 They have no ``state_class`` on purpose: the history is in the imported statistics, and a sensor with a
 state class would produce a second, misplaced copy (the values refer to two days ago).

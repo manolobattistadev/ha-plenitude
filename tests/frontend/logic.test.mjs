@@ -19,7 +19,7 @@ const sandbox = {
 };
 vm.createContext(sandbox);
 vm.runInContext(source, sandbox);
-const { billingPeriod, periodRange, buildSeries, seriesValues, fixedShares, billingFixed, categoryName } = sandbox;
+const { billingPeriod, periodRange, buildSeries, seriesValues, fixedShares, billingFixed, costBreakdown, categoryName } = sandbox;
 
 const day = (y, m, d) => new Date(y, m - 1, d);
 const ymd = (date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
@@ -152,6 +152,54 @@ test("costs per kWh are added to the price of every band in euro", () => {
   };
   const series = seriesValues(buildSeries(entry, "bands", "eur", "it"), { a: [1], b: [1], d: [1] }, 1);
   assert.deepEqual(Array.from(series, (s) => Math.round(s.values[0] * 100) / 100), [0.35, 0.25, 0.15]);
+});
+
+const close = (a, b) => Math.abs(a - b) < 1e-9;
+// VAT at 10 % on everything but the TV licence fee and a bonus per kWh excluded from it.
+const WITH_VAT = {
+  statistics: { consumo: "c", f1: "a", f2: "b", f3: "d", costo: "e" },
+  prices: { f1: 0.2, f2: 0.2, f3: 0.2 },
+  price_mode: "single",
+  costs: [
+    { name: "Oneri", kind: "per_kwh", amount: 0.05, exempt: false, yearly: null },
+    { name: "Bonus", kind: "per_kwh", amount: -0.01, exempt: true, yearly: null },
+    { name: "Quota fissa", kind: "monthly", amount: 10, exempt: false, yearly: 120 },
+    { name: "Canone TV", kind: "monthly", amount: 9, exempt: true, yearly: 108 },
+    { name: "IVA", kind: "percent", amount: 10, yearly: null },
+  ],
+  categories: [],
+  first_day: "2026-01-04",
+  last_day: "2026-11-21",
+};
+
+test("percentages apply to the periodic costs, except to those excluded", () => {
+  const current = billingPeriod(day(2026, 1, 1), 2, day(2026, 11, 23));
+  assert.ok(close(billingFixed(WITH_VAT, current, 2), (10 * 1.1 + 9) * 2)); // 40 EUR, not 38 nor 41.8
+  assert.ok(close(billingFixed(WITH_VAT, current, 2, undefined, false), 38)); // as entered
+  const november = fixedShares(WITH_VAT, periodRange("month", day(2026, 11, 10)).buckets);
+  assert.ok(close(november.reduce((a, v) => a + (v || 0), 0), 10 * 1.1 + 9));
+});
+
+test("cost breakdown: the energy out of the cost statistic, every cost as entered, the percentage on its base", () => {
+  const kwh = 100;
+  const usageEur = kwh * ((0.2 + 0.05) * 1.1 - 0.01); // what the integration writes in the cost statistic
+  const current = billingPeriod(day(2026, 1, 1), 2, day(2026, 11, 23));
+  const fixedOf = (items, withPercent) => billingFixed(WITH_VAT, current, 2, items, withPercent);
+  const rows = costBreakdown(WITH_VAT, usageEur, kwh, fixedOf);
+  const byName = Object.fromEntries(rows.map((r) => [r.cost ? r.cost.name : "energy", Math.round(r.value * 1e6) / 1e6]));
+  assert.deepEqual({ ...byName }, { energy: 20, Oneri: 5, Bonus: -1, "Quota fissa": 20, "Canone TV": 18, IVA: 4.5 });
+  // The rows add up to the total of the card: the cost statistic plus the periodic costs with their VAT.
+  assert.ok(close(rows.reduce((a, r) => a + r.value, 0), usageEur + billingFixed(WITH_VAT, current, 2)));
+});
+
+test("bands in euro: the price of an hour from the integration, with the percentages", () => {
+  const changes = { a: [1], b: [1], d: [1] };
+  const fromIntegration = { ...WITH_VAT, hour_prices: { f1: 0.5, f2: 0.4, f3: 0.3 } };
+  const given = seriesValues(buildSeries({ ...fromIntegration, price_mode: "three" }, "bands", "eur", "it"), changes, 1);
+  assert.deepEqual(Array.from(given, (s) => s.values[0]), [0.5, 0.4, 0.3]);
+  // Older integration without hour_prices: the same formula as the cost statistic.
+  const computed = seriesValues(buildSeries({ ...WITH_VAT, price_mode: "three" }, "bands", "eur", "it"), changes, 1);
+  assert.ok(close(computed[0].values[0], (0.2 + 0.05) * 1.1 - 0.01));
 });
 
 test("category names: the portal's in Italian, translated in English", () => {

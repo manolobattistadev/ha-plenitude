@@ -141,8 +141,7 @@ async def test_price_options(hass: HomeAssistant) -> None:
     assert suggested(result, "price") == "0,29"
 
 
-async def test_costs(hass: HomeAssistant) -> None:
-    """Costs are subentries: as many as wanted, each with name, kind and amount (at most 6 decimals)."""
+def cost_entry(hass: HomeAssistant) -> MockConfigEntry:
     entry = MockConfigEntry(
         domain=DOMAIN,
         unique_id=supply_key(POD),
@@ -150,42 +149,103 @@ async def test_costs(hass: HomeAssistant) -> None:
         options={PRICE_MODE: "none"},
     )
     entry.add_to_hass(hass)
+    return entry
 
-    async def add(user_input: dict) -> dict:
-        result = await hass.config_entries.subentries.async_init((entry.entry_id, "cost"), context={"source": "user"})
-        assert result["type"] is FlowResultType.FORM and result["step_id"] == "user"
-        return await hass.config_entries.subentries.async_configure(result["flow_id"], user_input)
 
-    result = await add({"name": "Canone RAI", "kind": "yearly", "amount": "90"})
+async def add_cost(hass: HomeAssistant, entry: MockConfigEntry, name: str, kind: str) -> dict:
+    """First step of a new cost (name and kind): returns the second step."""
+    result = await hass.config_entries.subentries.async_init((entry.entry_id, "cost"), context={"source": "user"})
+    assert result["type"] is FlowResultType.FORM and result["step_id"] == "user"
+    return await hass.config_entries.subentries.async_configure(result["flow_id"], {"name": name, "kind": kind})
+
+
+async def edit_cost(hass: HomeAssistant, entry: MockConfigEntry, subentry_id: str, name: str, kind: str) -> dict:
+    result = await entry.start_subentry_reconfigure_flow(hass, subentry_id)
+    assert result["step_id"] == "reconfigure"
+    return await hass.config_entries.subentries.async_configure(result["flow_id"], {"name": name, "kind": kind})
+
+
+async def configure(hass: HomeAssistant, result: dict, user_input: dict) -> dict:
+    return await hass.config_entries.subentries.async_configure(result["flow_id"], user_input)
+
+
+def suffix(result: dict, field: str) -> str | None:
+    for key, selector in result["data_schema"].schema.items():
+        if key == field:
+            return selector.config.get("suffix")
+    raise KeyError(field)
+
+
+async def test_costs(hass: HomeAssistant) -> None:
+    """Costs are subentries: as many as wanted, name and kind first, then the amount (at most 6 decimals) in the
+    unit of the kind and whether the percentages apply."""
+    entry = cost_entry(hass)
+
+    result = await add_cost(hass, entry, "Canone RAI", "yearly")
+    assert result["step_id"] == "amount" and suffix(result, "amount") == "€"
+    assert result["description_placeholders"] == {"name": "Canone RAI"}
+    result = await configure(hass, result, {"amount": "90", "exempt": True})
     assert result["type"] is FlowResultType.CREATE_ENTRY
-    result = await add({"name": " Oneri di sistema ", "kind": "per_kwh", "amount": "0,041234"})
+    result = await add_cost(hass, entry, " Oneri di sistema ", "per_kwh")
+    assert result["step_id"] == "amount" and suffix(result, "amount") == "€/kWh"
+    result = await configure(hass, result, {"amount": "0,041234"})  # exempt left out: not exempt
     assert result["type"] is FlowResultType.CREATE_ENTRY
     costs = {sub.title: dict(sub.data) for sub in entry.subentries.values()}
     assert costs == {
-        "Canone RAI": {"name": "Canone RAI", "kind": "yearly", "amount": 90.0},
-        "Oneri di sistema": {"name": "Oneri di sistema", "kind": "per_kwh", "amount": 0.041234},
+        "Canone RAI": {"name": "Canone RAI", "kind": "yearly", "amount": 90.0, "exempt": True},
+        "Oneri di sistema": {"name": "Oneri di sistema", "kind": "per_kwh", "amount": 0.041234, "exempt": False},
     }
 
-    result = await add({"name": "Troppi decimali", "kind": "monthly", "amount": "0,1234567"})
+    result = await add_cost(hass, entry, "Troppi decimali", "monthly")
+    result = await configure(hass, result, {"amount": "0,1234567"})
     assert result["type"] is FlowResultType.FORM and result["errors"] == {"amount": "too_many_decimals"}
     for typed in ("9,15,3", "1.234,56", "nove", ""):
-        result = await add({"name": "Canone", "kind": "monthly", "amount": typed})
+        result = await configure(hass, result, {"amount": typed})
         assert result["errors"] == {"amount": "invalid_number"}, typed
-    result = await add({"name": "Enorme", "kind": "yearly", "amount": "100000,01"})
+    result = await configure(hass, result, {"amount": "100000,01"})
     assert result["errors"] == {"amount": "out_of_range"}
-    result = await add({"name": "   ", "kind": "monthly", "amount": "1"})
+    result = await hass.config_entries.subentries.async_init((entry.entry_id, "cost"), context={"source": "user"})
+    result = await configure(hass, result, {"name": "   ", "kind": "monthly"})
     assert result["type"] is FlowResultType.FORM and result["errors"] == {"name": "empty_name"}
 
-    # Edit one: the form starts from its values.
+    # Edit one: both steps start from its values.
     subentry_id = next(sid for sid, sub in entry.subentries.items() if sub.title == "Canone RAI")
     result = await entry.start_subentry_reconfigure_flow(hass, subentry_id)
-    assert result["step_id"] == "reconfigure"
-    result = await hass.config_entries.subentries.async_configure(
-        result["flow_id"], {"name": "Canone TV", "kind": "monthly", "amount": "9"}
-    )
+    assert suggested(result, "name") == "Canone RAI" and suggested(result, "kind") == "yearly"
+    result = await configure(hass, result, {"name": "Canone TV", "kind": "monthly"})
+    assert suggested(result, "amount") == "90" and suggested(result, "exempt") is True
+    result = await configure(hass, result, {"amount": "9", "exempt": True})
     assert result["type"] is FlowResultType.ABORT and result["reason"] == "reconfigure_successful"
     assert entry.subentries[subentry_id].title == "Canone TV"
-    assert dict(entry.subentries[subentry_id].data) == {"name": "Canone TV", "kind": "monthly", "amount": 9.0}
+    expected = {"name": "Canone TV", "kind": "monthly", "amount": 9.0, "exempt": True}
+    assert dict(entry.subentries[subentry_id].data) == expected
+
+
+async def test_cost_percent(hass: HomeAssistant) -> None:
+    """A percentage (VAT): amount in %, between -100 and 100, never exempt; switching to euro drops the amount."""
+    entry = cost_entry(hass)
+    result = await add_cost(hass, entry, "IVA", "percent")
+    assert result["step_id"] == "percent" and suffix(result, "amount") == "%"
+    assert "exempt" not in result["data_schema"].schema  # the percentages do not apply to each other
+    for typed in ("100,5", "-101", "dieci", "10.1234567"):
+        result = await configure(hass, result, {"amount": typed})
+        assert result["errors"] == {"amount": "invalid_percent"}, typed
+    result = await configure(hass, result, {"amount": "10"})
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    (subentry_id,) = entry.subentries
+    assert dict(entry.subentries[subentry_id].data) == {"name": "IVA", "kind": "percent", "amount": 10.0}
+
+    # Same unit: the amount is suggested again (with the decimal comma when the server is in Italian).
+    hass.config.language = "it"
+    result = await edit_cost(hass, entry, subentry_id, "IVA ridotta", "percent")
+    assert suggested(result, "amount") == "10"
+    result = await configure(hass, result, {"amount": "4,5"})
+    assert dict(entry.subentries[subentry_id].data) == {"name": "IVA ridotta", "kind": "percent", "amount": 4.5}
+    result = await edit_cost(hass, entry, subentry_id, "IVA ridotta", "percent")
+    assert suggested(result, "amount") == "4,5"
+    # Another unit: 4.5 % is not 4.5 euro, nothing is suggested.
+    result = await edit_cost(hass, entry, subentry_id, "Quota fissa", "monthly")
+    assert suggested(result, "amount") is None and suggested(result, "exempt") is False
 
 
 def suggested(result: dict, field: str):
@@ -196,46 +256,36 @@ def suggested(result: dict, field: str):
 
 
 async def test_cost_per_kw_asks_the_power(hass: HomeAssistant) -> None:
-    """A cost per kW per month asks the power of the contract in a second step, and keeps it when edited."""
-    entry = MockConfigEntry(
-        domain=DOMAIN,
-        unique_id=supply_key(POD),
-        data={**CREDENTIALS, CONF_SUPPLY: supply_key(POD)},
-        options={PRICE_MODE: "none"},
-    )
-    entry.add_to_hass(hass)
-    result = await hass.config_entries.subentries.async_init((entry.entry_id, "cost"), context={"source": "user"})
-    result = await hass.config_entries.subentries.async_configure(
-        result["flow_id"], {"name": "Quota potenza", "kind": "per_kw_monthly", "amount": "1,716"}
-    )
-    assert result["type"] is FlowResultType.FORM and result["step_id"] == "power"
+    """A cost per kW per month asks the power of the contract with the amount, and keeps it when edited."""
+    entry = cost_entry(hass)
+    result = await add_cost(hass, entry, "Quota potenza", "per_kw_monthly")
+    assert result["type"] is FlowResultType.FORM and result["step_id"] == "per_kw"
+    assert suffix(result, "amount") == "€/kW" and suffix(result, "power") == "kW"
     assert result["description_placeholders"] == {"name": "Quota potenza"}
     assert suggested(result, "power") is None  # entry not loaded: no power from the customer area
-    result = await hass.config_entries.subentries.async_configure(result["flow_id"], {"power": "0"})
+    result = await configure(hass, result, {"amount": "1,716", "power": "0"})
     assert result["errors"] == {"power": "invalid_power"}
-    result = await hass.config_entries.subentries.async_configure(result["flow_id"], {"power": "4,5"})
+    result = await configure(hass, result, {"amount": "1,716", "power": "4,5"})
     assert result["type"] is FlowResultType.CREATE_ENTRY
     (subentry_id,) = entry.subentries
-    expected = {"name": "Quota potenza", "kind": "per_kw_monthly", "amount": 1.716, "power": 4.5}
+    expected = {"name": "Quota potenza", "kind": "per_kw_monthly", "amount": 1.716, "power": 4.5, "exempt": False}
     assert dict(entry.subentries[subentry_id].data) == expected
 
-    # Edit: the power entered before is suggested.
-    result = await entry.start_subentry_reconfigure_flow(hass, subentry_id)
-    result = await hass.config_entries.subentries.async_configure(
-        result["flow_id"], {"name": "Quota potenza", "kind": "per_kw_monthly", "amount": "1.8"}
-    )
-    assert result["step_id"] == "power" and suggested(result, "power") == "4.5"
-    result = await hass.config_entries.subentries.async_configure(result["flow_id"], {"power": "6"})
+    # Edit: the amount and the power entered before are suggested.
+    result = await edit_cost(hass, entry, subentry_id, "Quota potenza", "per_kw_monthly")
+    assert result["step_id"] == "per_kw" and suggested(result, "power") == "4.5"
+    assert suggested(result, "amount") == "1.716"
+    result = await configure(hass, result, {"amount": "1.8", "power": "6"})
     assert result["type"] is FlowResultType.ABORT and result["reason"] == "reconfigure_successful"
     assert dict(entry.subentries[subentry_id].data) == {**expected, "amount": 1.8, "power": 6.0}
 
-    # Changed to a monthly cost: no second step, no power.
-    result = await entry.start_subentry_reconfigure_flow(hass, subentry_id)
-    result = await hass.config_entries.subentries.async_configure(
-        result["flow_id"], {"name": "Quota fissa", "kind": "monthly", "amount": "9"}
-    )
+    # Changed to a monthly cost: no power.
+    result = await edit_cost(hass, entry, subentry_id, "Quota fissa", "monthly")
+    assert result["step_id"] == "amount" and "power" not in result["data_schema"].schema
+    result = await configure(hass, result, {"amount": "9"})
     assert result["type"] is FlowResultType.ABORT
-    assert dict(entry.subentries[subentry_id].data) == {"name": "Quota fissa", "kind": "monthly", "amount": 9.0}
+    expected = {"name": "Quota fissa", "kind": "monthly", "amount": 9.0, "exempt": False}
+    assert dict(entry.subentries[subentry_id].data) == expected
 
 
 @pytest.mark.parametrize("refused", [False, True])

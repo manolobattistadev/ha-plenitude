@@ -47,7 +47,7 @@ async def test_diagnostics_hide_personal_data(
     text = json.dumps(result)
     for secret in (EMAIL, PASSWORD, POD, supply_key(POD), "9999", "Via di prova"):
         assert secret not in text
-    assert result["entry"]["costs"] == [{"name": "Quota fissa", "kind": "monthly", "amount": 10.0}]
+    assert result["entry"]["costs"] == [{"name": "Quota fissa", "kind": "monthly", "amount": 10.0, "exempt": False}]
     assert result["supply"] == {"found": True, "consumption_analysis": True}
     assert result["sync"]["last_update_success"] is True
     assert result["sync"]["first_day"] == "2026-11-16"

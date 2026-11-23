@@ -4,8 +4,9 @@ Statistics (``{prefix}`` is ``plenitude:luce_<key of the supply>``), all with a 
 
 - ``{prefix}_consumo``: measured kWh per hour;
 - ``{prefix}_f1``, ``_f2``, ``_f3``: the same hours split by ARERA band (0 in the hours of other bands);
-- ``{prefix}_costo``: EUR per hour, kWh x (price of the band + costs per kWh), when a price or an additional cost
-  is configured (monthly, two-monthly and yearly costs are not in it: the cards spread them over the days);
+- ``{prefix}_costo``: EUR per hour, kWh x (price of the band + costs per kWh), with the percentage costs (VAT)
+  applied to them, when a price or an additional cost is configured (periodic costs are not in it: the cards
+  count them month by month);
 - ``{prefix}_cat_<category>``: estimated kWh per day (one value at local midnight), as the portal gives them.
 
 Data arrive about two days late, so they are imported with their own timestamps instead of being sensor states.
@@ -687,7 +688,8 @@ class PlenitudeCoordinator(DataUpdateCoordinator[PlenitudeData]):
             await self._written()
 
     async def _rebuild_cost(self, recent: dict[datetime, float]) -> None:
-        """Prices or costs per kWh changed: rewrite the whole cost history from the stored hourly consumption."""
+        """Prices, costs per kWh or percentages changed: rewrite the whole cost history from the stored hourly
+        consumption."""
         self._clear([self.cost_id])
         if not self.has_cost:
             _LOGGER.info("Plenitude: no price and no additional cost, cost statistic removed")

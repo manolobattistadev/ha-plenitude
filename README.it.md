@@ -14,7 +14,8 @@ Un'integrazione di Home Assistant che porta in Home Assistant i consumi di luce 
 - gli stessi consumi divisi per **fascia ARERA** (F1, F2, F3);
 - le **categorie stimate** dell'area clienti (comfort ambientale, lavare, cucinare…), giorno per giorno;
 - il **costo**, dai prezzi che inserisci (prezzo unico, due o tre fasce) più **tutti gli altri costi che vuoi**
-  (mensili, bimestrali, annuali o per kWh: canone RAI, quota fissa, oneri di sistema…);
+  (mensili, bimestrali, annuali, per kW, per kWh o in percentuale: canone RAI, quota fissa, quota potenza, oneri di
+  sistema, IVA…);
 - due **card** per le dashboard: il grafico dei consumi con il periodo che preferisci e la **bolletta in corso**
   (kWh ed euro del periodo di fatturazione finora, con una stima a fine periodo).
 
@@ -82,21 +83,25 @@ Plenitude non espone il prezzo della tua offerta, quindi il costo si calcola dai
 | Due fasce (bioraria) | F1 e F23 (F2 + F3) |
 | Tre fasce (multioraria) | F1, F2 e F3 |
 
-**Altri costi.** Nella stessa pagina scegli **Aggiungi costo**, tutte le volte che serve. Ogni costo ha:
-- **Nome**: un testo libero, per esempio canone RAI, quota fissa, quota potenza, oneri di sistema;
-- **Tipologia**: mensile, bimestrale, annuale, €/kW al mese o per kWh;
-- **Importo**: in euro (euro per kWh per i costi per kWh, euro per kW per i costi in €/kW al mese), con la virgola
-  o il punto per i decimali (`9,15` o `9.15`), al massimo 6 decimali, senza separatori delle migliaia. Per uno
-  sconto usa un importo negativo. Lo stesso vale per i prezzi.
+**Altri costi.** Nella stessa pagina scegli **Aggiungi costo**, tutte le volte che serve. Prima indichi del costo:
+- **Nome**: un testo libero, per esempio canone RAI, quota fissa, quota potenza, oneri di sistema, IVA;
+- **Tipologia**: mensile, bimestrale, annuale, €/kW al mese, per kWh o percentuale.
+
+Poi, nell'unità della tipologia:
+- **Importo**: euro, euro per kWh, euro per kW o percentuale, con la virgola o il punto per i decimali (`9,15` o
+  `9.15`), al massimo 6 decimali, senza separatori delle migliaia. Per uno sconto usa un importo negativo. Lo
+  stesso vale per i prezzi.
 - **Potenza**, solo per i costi in €/kW al mese (la quota potenza della bolletta): la potenza del contratto in kW,
   come in bolletta (potenza impegnata). Se l'area clienti la indica, è già proposta.
+- **Escluso dalle percentuali**, per tutte le tipologie tranne le percentuali: attivalo per un costo che non paga
+  l'IVA, come il canone TV.
 
 I costi sono elencati sotto l'integrazione, dove puoi modificarli o eliminarli.
 
 Come vengono contati:
 - I costi **per kWh** si aggiungono al prezzo di ogni ora: sono nella statistica del costo, nella dashboard
-  Energia, nel sensore e nelle card. Quando cambiano i prezzi o i costi per kWh, il costo di tutto lo storico
-  viene ricalcolato.
+  Energia, nel sensore e nelle card. Quando cambiano i prezzi, i costi per kWh o le percentuali, il costo di tutto
+  lo storico viene ricalcolato.
 - I costi **mensili, bimestrali, annuali e in €/kW al mese** non dipendono dalle ore, quindi **non** sono nella
   statistica del costo né nella dashboard Energia. Le card li contano **per intero, come inseriti**: ogni mese
   porta 1/12 dei loro euro all'anno (importo × 12 per i mensili, × 6 per i bimestrali, × 1 per gli annuali,
@@ -104,10 +109,15 @@ Come vengono contati:
   dell'ultimo. Un mese mostra il suo importo intero anche se non è finito. La card della bolletta in corso conta
   tutti i mesi del periodo, anche prima che finisca (un canone TV di 9 euro al mese vale 18 euro in una bolletta
   bimestrale), ed elenca ogni costo.
+- Le **percentuali** (per esempio l'IVA) si applicano al prezzo dell'energia e a tutti gli altri costi non esclusi:
+  alle ore nella statistica del costo, nella dashboard Energia e nel sensore, ai costi periodici nelle card. La card
+  della bolletta in corso mostra ognuna su una riga a sé. Più percentuali si sommano e non si applicano l'una
+  all'altra (10% e 2% fanno 12%).
 
 **Avvicinarsi alla bolletta.** Come prezzo usa quello dell'energia della tua offerta, poi aggiungi come costi le
-altre voci di una bolletta: trasporto, oneri di sistema e accise per kWh; quota fissa e canone RAI come costi
-periodici; la quota potenza come costo in €/kW al mese. Includi l'IVA in ogni importo.
+altre voci di una bolletta, senza IVA: trasporto, oneri di sistema e accise per kWh; quota fissa e canone RAI come
+costi periodici; la quota potenza come costo in €/kW al mese. Poi aggiungi l'IVA come percentuale (10% per le
+abitazioni) ed escludi il canone RAI.
 
 ## Cosa ottieni
 
@@ -119,7 +129,7 @@ L'integrazione importa statistiche storiche con sorgente `plenitude`. Negli iden
 |---|---|---|
 | `<p>_consumo` | kWh | consumo misurato, ora per ora |
 | `<p>_f1`, `<p>_f2`, `<p>_f3` | kWh | lo stesso consumo diviso per fascia ARERA (0 nelle ore delle altre fasce) |
-| `<p>_costo` | EUR | kWh × (prezzo della fascia + costi per kWh), con un prezzo o un costo (costi periodici esclusi) |
+| `<p>_costo` | EUR | kWh × (prezzo della fascia + costi per kWh), con le percentuali; con un prezzo o un costo (costi periodici esclusi) |
 | `<p>_cat_<categoria>` | kWh | la ripartizione **stimata** dell'area clienti, un valore al giorno |
 
 Categorie: `comfort_ambientale`, `standby`, `lavare`, `elettronica_luci`, `refrigerare`, `cucinare`,
@@ -133,7 +143,7 @@ electricity consumption*.
 |---|---|
 | Ultimo giorno disponibile | il giorno più recente con dati |
 | Consumo dell'ultimo giorno | kWh di quel giorno |
-| Costo dei consumi dell'ultimo giorno | euro di quel giorno: energia e costi per kWh, senza costi periodici |
+| Costo dei consumi dell'ultimo giorno | euro di quel giorno: energia e costi per kWh con le percentuali, senza costi periodici |
 
 Mostrano a che punto è l'import. Non hanno `state_class` di proposito: la storia è nelle statistiche, con le date
 giuste.
@@ -172,14 +182,14 @@ unit: kwh          # kwh | eur
 ```
 
 - Le **categorie** sono stime giornaliere: non ci sono nella vista del giorno e solo in kWh.
-- **In euro**, i costi periodici (mensili, bimestrali, annuali, €/kW al mese) sono il segmento grigio alla base
-  delle colonne.
+- **In euro**, i costi periodici (mensili, bimestrali, annuali, €/kW al mese), con le loro percentuali, sono il
+  segmento grigio alla base delle colonne.
 
 ### Bolletta in corso
 Consumo e costo dall'inizio del periodo di fatturazione in corso all'ultimo giorno con dati. Mostra anche:
 - la ripartizione per fascia;
 - l'avanzamento del periodo;
-- la composizione del costo: energia, poi ogni costo che hai inserito;
+- la composizione del costo: energia, poi ogni costo che hai inserito, poi ogni percentuale;
 - una stima a fine periodo (media dei giorni con dati × durata del periodo, più i costi periodici dell'intero
   periodo);
 - le colonne giorno per giorno.
@@ -276,7 +286,8 @@ Per segnalare una vulnerabilità vedi [SECURITY.md](SECURITY.md).
   `/plenitude_static/plenitude-cards.js` sul tuo Home Assistant: deve mostrare il codice delle card con la versione
   in cima. Non aggiungere le card alle risorse della dashboard: le carica l'integrazione.
 - **Il costo è diverso dalla bolletta.** Vedi [Prezzi e costi](#prezzi-e-costi): inserisci ogni voce della
-  bolletta come costo, IVA compresa. Le bollette possono contenere anche conguagli e letture stimate.
+  bolletta come costo, senza IVA, e l'IVA come percentuale. Le bollette possono contenere anche conguagli e letture
+  stimate.
 
 ## Rimozione
 1. **Impostazioni → Dispositivi e servizi → Eni Plenitude → ⋮ → Elimina.**
@@ -289,8 +300,8 @@ Per segnalare una vulnerabilità vedi [SECURITY.md](SECURITY.md).
 - Le categorie sono stime di Plenitude e arrivano solo giorno per giorno.
 - I valori mensili per fascia dell'area clienti non sono usati: non coincidono con i mesi di calendario (sembrano
   periodi di lettura o di fatturazione).
-- Il costo è una stima dai tuoi prezzi: le bollette contengono anche imposte, conguagli e letture stimate che
-  l'integrazione non può conoscere.
+- Il costo è una stima dai prezzi, dai costi e dalle percentuali che inserisci: le bollette contengono anche
+  conguagli e letture stimate che l'integrazione non può conoscere.
 - Solo luce; il gas non è ancora supportato.
 
 ## Sviluppo

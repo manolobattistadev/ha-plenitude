@@ -13,6 +13,7 @@ from custom_components.plenitude.costs import (
     hour_price,
     parse_number,
     per_kwh_extra,
+    percent_rate,
 )
 
 NO_PRICE = {"price_mode": "none"}
@@ -59,14 +60,46 @@ def test_yearly_amount_of_the_periodic_costs() -> None:
 def test_power_is_kept_only_for_the_costs_per_kw() -> None:
     data = {"name": "Quota potenza", "kind": "per_kw_monthly", "amount": 1.5, "power": 6}
     item = CostItem.from_data(data)
-    assert item.power == 6.0 and item.as_dict() == {**data, "power": 6.0}
+    assert item.power == 6.0 and item.as_dict() == {**data, "power": 6.0, "exempt": False}
     # A cost changed to another kind forgets the power; costs saved before 0.4.0 have none.
     assert CostItem.from_data({**data, "kind": "monthly"}).as_dict() == {
         "name": "Quota potenza",
         "kind": "monthly",
         "amount": 1.5,
+        "exempt": False,
     }
     assert CostItem.from_data({"name": "RAI", "kind": "yearly", "amount": 90}).power is None
+
+
+def test_percentages_apply_to_the_energy_and_to_the_costs_not_exempt() -> None:
+    vat = CostItem("IVA", "percent", 10)
+    items = [CostItem("Oneri", "per_kwh", 0.04), CostItem("Bonus", "per_kwh", -0.01, exempt=True), vat]
+    assert percent_rate(items) == pytest.approx(0.10)
+    assert per_kwh_extra(items) == pytest.approx(0.04) and per_kwh_extra(items, exempt=True) == pytest.approx(-0.01)
+    assert hour_price("f1", SINGLE, items) == pytest.approx((0.2 + 0.04) * 1.1 - 0.01)
+    # Two percentages add up, they do not apply to each other: 10 % + 2 % is 12 %, not 12.2 %.
+    assert hour_price("f1", SINGLE, [vat, CostItem("Altro", "percent", 2)]) == pytest.approx(0.2 * 1.12)
+    assert vat.yearly is None  # follows the other costs
+
+
+def test_exempt_is_kept_but_never_for_a_percentage() -> None:
+    data = {"name": "Canone TV", "kind": "monthly", "amount": 9, "exempt": True}
+    assert CostItem.from_data(data).exempt and CostItem.from_data(data).as_dict() == {**data, "amount": 9.0}
+    assert not CostItem.from_data({"name": "RAI", "kind": "yearly", "amount": 90}).exempt  # saved before 0.5.0
+    vat = CostItem.from_data({"name": "IVA", "kind": "percent", "amount": 10, "exempt": True})
+    assert not vat.exempt and vat.as_dict() == {"name": "IVA", "kind": "percent", "amount": 10.0}
+
+
+def test_percentages_and_exempt_costs_per_kwh_rebuild_the_history() -> None:
+    before = cost_signature(SINGLE, [CostItem("Oneri", "per_kwh", 0.04), CostItem("RAI", "yearly", 90)])
+    # Entries without them keep the signature of 0.4: updating does not rebuild their history.
+    assert before == "single:price=0.2|kwh=0.04"
+    vat = CostItem("IVA", "percent", 10)
+    assert cost_signature(SINGLE, [CostItem("Oneri", "per_kwh", 0.04), vat]) != before
+    exempt = CostItem("Oneri", "per_kwh", 0.04, exempt=True)
+    assert cost_signature(SINGLE, [exempt]) != before
+    # A periodic cost excluded from the percentages is not in the hourly cost.
+    assert cost_signature(SINGLE, [CostItem("RAI", "yearly", 90, exempt=True)]) == cost_signature(SINGLE, [])
 
 
 def test_costs_per_kw_do_not_rebuild_the_history() -> None:

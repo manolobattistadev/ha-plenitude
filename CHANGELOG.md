@@ -4,6 +4,21 @@ All notable changes to this project are listed here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [semantic versioning](https://semver.org/).
 
+## [0.5.0] - 2026-11-23
+
+### Added
+- **Percentage costs** (VAT, for example): a percentage of the energy price and of every other cost, in the cost
+  statistic (so also in the Energy dashboard and in the cost sensor) and in the cards, with its own line in the cost
+  breakdown. Several percentages add up and do not apply to each other.
+- Every other cost can be **excluded from the percentages** (the TV licence fee pays no VAT in the bill).
+
+### Changed
+- A cost is added in two steps: name and type, then the amount in the unit of the type (€, €/kWh, €/kW with the
+  power of the contract, %) and the exclusion from the percentages.
+- `plenitude/info` returns the price of an hour of each band as in the cost statistic (`hour_prices`) and the
+  exclusion of every cost.
+- Entries without percentages and exclusions keep their cost history: nothing is recomputed by the update.
+
 ## [0.4.1] - 2026-11-23
 
 ### Changed

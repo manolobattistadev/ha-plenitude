@@ -6,10 +6,12 @@
  *   custom:plenitude-billing-card      current billing period (two months from a chosen day): kWh and cost
  *                                      so far, bands, estimate at the end of the period
  *
- * Costs: the cost statistic is kWh x (price of the band + costs per kWh). The periodic costs entered in the
- * integration (monthly, two-monthly, yearly, per kW per month) count in full, as entered: every month carries
- * 1/12 of their euro per year, split among its days; a billing period carries its months in full, also before
- * it is over (9 euro a month: 18 euro in a two-month bill).
+ * Costs: the cost statistic is kWh x (price of the band + costs per kWh), with the percentage costs (VAT) applied
+ * to them. The periodic costs entered in the integration (monthly, two-monthly, yearly, per kW per month) count in
+ * full, as entered: every month carries 1/12 of their euro per year, split among its days; a billing period
+ * carries its months in full, also before it is over (9 euro a month: 18 euro in a two-month bill). The
+ * percentages apply to them too, except to the costs marked as excluded (the TV licence fee pays no VAT), and
+ * never to each other.
  * Texts in Italian and English, following the language of the user's profile.
  *
  * The statistics change about once a day, when the integration imports new days: what the cards read is kept
@@ -22,7 +24,7 @@
  * and hand-drawn SVG. Text that comes from outside (category names) is always set with textContent.
  */
 
-const CARD_VERSION = "0.4.1";
+const CARD_VERSION = "0.5.0";
 
 // ------------------------------------------------------------------------------------------- language
 
@@ -76,7 +78,7 @@ const STRINGS = {
     estimate_note: "media dei giorni con dati × durata del periodo",
     choose_start: "Scegli nelle impostazioni della card il primo giorno di un periodo di fatturazione.",
     cost_note:
-      "Il costo è kWh × (prezzo della fascia + costi per kWh), più i costi periodici (mensili, bimestrali, annuali, €/kW al mese) per intero, come impostati nell'integrazione: quelli di tutto il periodo, anche se non è finito. È una stima: la bolletta può contenere anche conguagli e letture stimate.",
+      "Il costo è kWh × (prezzo della fascia + costi per kWh), più i costi periodici (mensili, bimestrali, annuali, €/kW al mese) per intero, come impostati nell'integrazione: quelli di tutto il periodo, anche se non è finito. Le percentuali (per esempio l'IVA) si applicano a tutto, tranne ai costi esclusi. È una stima: la bolletta può contenere anche conguagli e letture stimate.",
     future: "periodo futuro",
     period_total: "Totale del periodo",
     when: "Quando",
@@ -90,6 +92,8 @@ const STRINGS = {
     kind_yearly: "annuale",
     kind_per_kw_monthly: "€/kW al mese",
     kind_per_kwh: "per kWh",
+    kind_percent: "percentuale",
+    exempt: "escluso dalle percentuali",
     cat_comfort_ambientale: "Comfort ambientale (HVAC)",
     cat_standby: "Standby",
     cat_lavare: "Lavare",
@@ -148,7 +152,7 @@ const STRINGS = {
     estimate_note: "average of the days with data × length of the period",
     choose_start: "Choose the first day of a billing period in the card settings.",
     cost_note:
-      "The cost is kWh × (price of the band + costs per kWh), plus the periodic costs (monthly, two-monthly, yearly, per kW per month) in full, as set in the integration: those of the whole period, also while it is not over. It is an estimate: the bill may also contain adjustments and estimated readings.",
+      "The cost is kWh × (price of the band + costs per kWh), plus the periodic costs (monthly, two-monthly, yearly, per kW per month) in full, as set in the integration: those of the whole period, also while it is not over. The percentages (VAT, for example) apply to everything but the costs excluded from them. It is an estimate: the bill may also contain adjustments and estimated readings.",
     future: "future period",
     period_total: "Period total",
     when: "When",
@@ -162,6 +166,8 @@ const STRINGS = {
     kind_yearly: "yearly",
     kind_per_kw_monthly: "per kW per month",
     kind_per_kwh: "per kWh",
+    kind_percent: "percentage",
+    exempt: "excluded from the percentages",
     cat_comfort_ambientale: "Heating and cooling (HVAC)",
     cat_standby: "Standby",
     cat_lavare: "Washing",
@@ -226,14 +232,26 @@ const startOfDay = (date) => new Date(date.getFullYear(), date.getMonth(), date.
 const daysBetween = (a, b) => Math.round((startOfDay(b) - startOfDay(a)) / 86400000);
 const daysInYear = (y) => (new Date(y, 1, 29).getMonth() === 1 ? 366 : 365);
 
-// Euro per year of a periodic cost, as computed by the integration (``yearly``; null for the costs per kWh).
+// Euro per year of a periodic cost, as computed by the integration (``yearly``, without the percentages; null for
+// the costs per kWh and for the percentages).
 const yearlyOf = (cost) => (cost.yearly === null || cost.yearly === undefined ? null : Number(cost.yearly));
 const periodicCosts = (entry) => (entry.costs || []).filter((c) => yearlyOf(c) !== null);
 const perKwhCosts = (entry) => (entry.costs || []).filter((c) => c.kind === "per_kwh");
-const perKwhExtra = (entry) => perKwhCosts(entry).reduce((a, c) => a + Number(c.amount), 0);
+const percentCosts = (entry) => (entry.costs || []).filter((c) => c.kind === "percent");
+/** Sum of the costs per kWh subject to the percentages (or, with ``exempt``, of those that are not). */
+const perKwhExtra = (entry, exempt = false) =>
+  perKwhCosts(entry).filter((c) => Boolean(c.exempt) === exempt).reduce((a, c) => a + Number(c.amount), 0);
+/** Sum of the percentages as a fraction (VAT at 10 %: 0.10). */
+const percentRate = (entry) => percentCosts(entry).reduce((a, c) => a + Number(c.amount), 0) / 100;
+/** What the percentages add to a cost: 1 + their sum, 1 for the costs excluded from them. */
+const percentFactor = (entry, cost) => (cost.exempt ? 1 : 1 + percentRate(entry));
 
-/** Euro a month of the periodic costs (all of them, or ``items``): 1/12 of their euro per year. */
-const monthlyFixed = (entry, items = periodicCosts(entry)) => items.reduce((a, c) => a + (yearlyOf(c) || 0), 0) / 12;
+/**
+ * Euro a month of the periodic costs (all of them, or ``items``): 1/12 of their euro per year, with the percentages
+ * (VAT) on those not excluded; ``withPercent`` false: as entered, without them.
+ */
+const monthlyFixed = (entry, items = periodicCosts(entry), withPercent = true) =>
+  items.reduce((a, c) => a + (yearlyOf(c) || 0) * (withPercent ? percentFactor(entry, c) : 1), 0) / 12;
 
 /**
  * Periodic costs in each bucket, as entered: every calendar month from the month of the first day of the history
@@ -266,10 +284,27 @@ function fixedShares(entry, buckets, items = periodicCosts(entry)) {
  * Periodic costs of a billing period of ``months`` months, as entered: the euro a month times the months of the
  * period, also while the period is not over. Nothing for a period that ends before the history starts.
  */
-function billingFixed(entry, period, months, items = periodicCosts(entry)) {
+function billingFixed(entry, period, months, items = periodicCosts(entry), withPercent = true) {
   if (!entry.prices) return 0;
   if (entry.first_day && period.end <= parseDay(entry.first_day)) return 0;
-  return monthlyFixed(entry, items) * months;
+  return monthlyFixed(entry, items, withPercent) * months;
+}
+
+/**
+ * Cost of a period item by item, as in the bill: the energy, every cost without the percentages, then every
+ * percentage on the base it applies to (energy, costs per kWh and periodic costs not excluded). ``usageEur`` comes
+ * from the cost statistic, which has the percentages in it: kWh x ((price + taxed per kWh) x (1 + rate) + exempt
+ * per kWh), so the energy is taken back out of it. The rows add up to ``usageEur + fixed``.
+ */
+function costBreakdown(entry, usageEur, kwh, fixedOf) {
+  const rate = percentRate(entry);
+  const taxedUsage = (usageEur - kwh * perKwhExtra(entry, true)) / (1 + rate);
+  const rows = [{ key: "energy", cost: null, value: taxedUsage - kwh * perKwhExtra(entry) }];
+  for (const c of perKwhCosts(entry)) rows.push({ key: "cost", cost: c, value: kwh * Number(c.amount) });
+  for (const c of periodicCosts(entry)) rows.push({ key: "cost", cost: c, value: fixedOf([c], false) });
+  const taxedFixed = fixedOf(periodicCosts(entry).filter((c) => !c.exempt), false);
+  for (const c of percentCosts(entry)) rows.push({ key: "cost", cost: c, value: (Number(c.amount) / 100) * (taxedUsage + taxedFixed) });
+  return rows;
 }
 const sumValues = (values) => (values || []).reduce((a, v) => a + (v || 0), 0);
 
@@ -327,6 +362,7 @@ const fmt = (lang) => {
     kwh: (v) => `${number(v < 1 ? 3 : v < 10 ? 2 : v < 100 ? 1 : 0).format(v)} kWh`,
     eur: (v) => euro.format(v),
     number: (v) => number(3).format(v),
+    percent: (v) => new Intl.NumberFormat(locale, { style: "percent", maximumFractionDigits: 4 }).format(v / 100),
     tick: (v, unit) => (unit === "eur" ? euro.format(v).replace(/[,.]00(?=\D|$)/, "") : number(v < 10 ? 1 : 0).format(v)),
     date,
     dayLong: (d) => date(d, { weekday: "long", day: "numeric", month: "long", year: "numeric" }),
@@ -472,8 +508,10 @@ function buildSeries(entry, view, unit, lang) {
     return entry.categories.map((c, i) => ({ key: c.key, name: categoryName(lang, c), color: i, parts: [{ id: c.statistic_id, factor: 1 }] }));
   }
   if (view === "bands") {
-    const extra = unit === "eur" ? perKwhExtra(entry) : 0;
-    const factor = (band) => (unit === "eur" ? (price[band] ?? 0) + extra : 1);
+    // Euro per kWh of each band as in the cost statistic (with the costs per kWh and the percentages).
+    const hourPrice = (band) =>
+      entry.hour_prices?.[band] ?? ((price[band] ?? 0) + perKwhExtra(entry)) * (1 + percentRate(entry)) + perKwhExtra(entry, true);
+    const factor = (band) => (unit === "eur" ? hourPrice(band) : 1);
     if (entry.price_mode === "two") {
       return [
         { key: "f1", name: "F1", color: 0, parts: [{ id: s.f1, factor: factor("f1") }] },
@@ -1267,10 +1305,16 @@ class PlenitudeBillingCard extends PlenitudeBase {
     }
     // Cost breakdown, item by item, when there are costs besides the energy.
     if (eur !== null && dataDays && (entry.costs || []).length) {
-      const kind = (c) => tr(lang, `kind_${c.kind}`) + (c.kind === "per_kw_monthly" && c.power ? `, ${f.number(c.power)} kW` : "");
-      const rows = [[tr(lang, "energy_cost"), null, usageEur - kwh * perKwhExtra(entry)]];
-      for (const c of perKwhCosts(entry)) rows.push([c.name, kind(c), kwh * Number(c.amount)]);
-      for (const c of periodicCosts(entry)) rows.push([c.name, kind(c), billingFixed(entry, period, this._config.months, [c])]);
+      const kind = (c) => {
+        if (c.kind === "percent") return f.percent(Number(c.amount));
+        let text = tr(lang, `kind_${c.kind}`) + (c.kind === "per_kw_monthly" && c.power ? `, ${f.number(c.power)} kW` : "");
+        if (c.exempt && percentCosts(entry).length) text += `, ${tr(lang, "exempt")}`;
+        return text;
+      };
+      const fixedOf = (items, withPercent) => billingFixed(entry, period, this._config.months, items, withPercent);
+      const rows = costBreakdown(entry, usageEur, kwh, fixedOf).map((r) =>
+        r.cost ? [r.cost.name, kind(r.cost), r.value] : [tr(lang, "energy_cost"), null, r.value],
+      );
       const line = ([name, kindText, value]) =>
         el("tr", {}, [el("td", {}, [name, kindText ? el("span", { class: "kind", text: ` · ${kindText}` }) : null]), el("td", { text: f.eur(value) })]);
       children.push(

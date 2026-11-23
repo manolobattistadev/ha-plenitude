@@ -88,7 +88,8 @@
         "bimonthly": "Bimestrale",
         "yearly": "Annuale",
         "per_kw_monthly": "€/kW al mese",
-        "per_kwh": "Per kWh"
+        "per_kwh": "Per kWh",
+        "percent": "Percentuale (per esempio IVA)"
       }
     }
   },
@@ -135,39 +136,61 @@
       "step": {
         "user": {
           "title": "Aggiungi un costo",
-          "description": "Un costo del tuo contratto oltre al prezzo dell'energia. I costi mensili, bimestrali, annuali e in €/kW al mese sono ripartiti sui giorni nelle card; i costi per kWh si aggiungono al prezzo di ogni ora, anche nella dashboard Energia.",
+          "description": "Un costo del tuo contratto oltre al prezzo dell'energia. I costi mensili, bimestrali, annuali e in €/kW al mese contano per intero nelle card; i costi per kWh e le percentuali (per esempio l'IVA) entrano nel costo di ogni ora, anche nella dashboard Energia. L'importo si inserisce al passo successivo.",
           "data": {
             "name": "Nome",
-            "kind": "Tipologia",
-            "amount": "Importo"
+            "kind": "Tipologia"
           },
           "data_description": {
-            "name": "Un testo libero, per esempio: canone RAI, quota fissa, quota potenza, oneri di sistema.",
-            "kind": "Come si paga l'importo: ogni mese, ogni due mesi, ogni anno, ogni mese per ogni kW di potenza del contratto (quota potenza) o per ogni kWh consumato.",
-            "amount": "Euro, con la virgola o il punto per i decimali (al massimo 6): euro per kWh per i costi per kWh, euro per kW per i costi in €/kW al mese. Per uno sconto usa un importo negativo."
+            "name": "Un testo libero, per esempio: canone RAI, quota fissa, quota potenza, oneri di sistema, IVA.",
+            "kind": "Come si paga: ogni mese, ogni due mesi, ogni anno, ogni mese per ogni kW di potenza del contratto (quota potenza), per ogni kWh consumato, oppure in percentuale sul resto della bolletta (per esempio l'IVA)."
           }
         },
         "reconfigure": {
           "title": "Modifica il costo",
           "data": {
             "name": "Nome",
-            "kind": "Tipologia",
-            "amount": "Importo"
+            "kind": "Tipologia"
           },
           "data_description": {
-            "name": "Un testo libero, per esempio: canone RAI, quota fissa, quota potenza, oneri di sistema.",
-            "kind": "Come si paga l'importo: ogni mese, ogni due mesi, ogni anno, ogni mese per ogni kW di potenza del contratto (quota potenza) o per ogni kWh consumato.",
-            "amount": "Euro, con la virgola o il punto per i decimali (al massimo 6): euro per kWh per i costi per kWh, euro per kW per i costi in €/kW al mese. Per uno sconto usa un importo negativo."
+            "name": "Un testo libero, per esempio: canone RAI, quota fissa, quota potenza, oneri di sistema, IVA.",
+            "kind": "Come si paga: ogni mese, ogni due mesi, ogni anno, ogni mese per ogni kW di potenza del contratto (quota potenza), per ogni kWh consumato, oppure in percentuale sul resto della bolletta (per esempio l'IVA)."
           }
         },
-        "power": {
-          "title": "Potenza del contratto",
-          "description": "**{name}** si paga ogni mese per ogni kW di potenza del contratto: in bolletta è la potenza impegnata. Se l'area clienti la indica, è già proposta.",
+        "amount": {
+          "title": "Importo",
+          "description": "Importo di **{name}**.",
           "data": {
-            "power": "Potenza"
+            "amount": "Importo",
+            "exempt": "Escluso dalle percentuali"
           },
           "data_description": {
-            "power": "kW, per esempio 3, 4,5 o 6."
+            "amount": "Euro (euro per kWh per i costi per kWh), con la virgola o il punto per i decimali (al massimo 6). Per uno sconto usa un importo negativo.",
+            "exempt": "Attivalo se le percentuali non si applicano a questo costo: per esempio il canone TV, che in bolletta non paga l'IVA."
+          }
+        },
+        "per_kw": {
+          "title": "Importo per kW e potenza",
+          "description": "**{name}** si paga ogni mese per ogni kW di potenza del contratto: in bolletta è la potenza impegnata. Se l'area clienti la indica, è già proposta.",
+          "data": {
+            "amount": "Importo per kW",
+            "power": "Potenza",
+            "exempt": "Escluso dalle percentuali"
+          },
+          "data_description": {
+            "amount": "Euro per kW al mese, con la virgola o il punto per i decimali (al massimo 6).",
+            "power": "kW, per esempio 3, 4,5 o 6.",
+            "exempt": "Attivalo se le percentuali non si applicano a questo costo: per esempio il canone TV, che in bolletta non paga l'IVA."
+          }
+        },
+        "percent": {
+          "title": "Percentuale",
+          "description": "**{name}** è una percentuale del prezzo dell'energia e di tutti i costi non esclusi, per esempio l'IVA al 10%. Più percentuali non si applicano l'una all'altra. Le accise in bolletta sono un importo per kWh: inseriscile come costo per kWh, così la percentuale si applica anche a loro.",
+          "data": {
+            "amount": "Percentuale"
+          },
+          "data_description": {
+            "amount": "Per esempio 10 per il 10%, con la virgola o il punto per i decimali (al massimo 6). Negativa per uno sconto."
           }
         }
       },
@@ -176,7 +199,8 @@
         "invalid_number": "Scrivi un numero, con la virgola o il punto per i decimali (per esempio 9,15 o 9.15), senza separatori delle migliaia.",
         "too_many_decimals": "Al massimo 6 decimali.",
         "out_of_range": "L'importo deve essere tra -100000 e 100000 euro.",
-        "invalid_power": "Inserisci una potenza tra 0,1 e 999 kW, con la virgola o il punto per i decimali (al massimo 6)."
+        "invalid_power": "Inserisci una potenza tra 0,1 e 999 kW, con la virgola o il punto per i decimali (al massimo 6).",
+        "invalid_percent": "Inserisci una percentuale tra -100 e 100, con la virgola o il punto per i decimali (al massimo 6)."
       },
       "abort": {
         "reconfigure_successful": "Costo aggiornato."
