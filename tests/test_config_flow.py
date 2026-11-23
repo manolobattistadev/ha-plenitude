@@ -118,7 +118,7 @@ async def test_price_options(hass: HomeAssistant) -> None:
     assert result["step_id"] == "prices"
     assert set(result["data_schema"].schema) == {"price_f1", "price_f2", "price_f3"}
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {"price_f1": 0.31, "price_f2": 0.27, "price_f3": 0.22}
+        result["flow_id"], {"price_f1": "0,31", "price_f2": "0.27", "price_f3": " 0,22 € "}
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert entry.options == {PRICE_MODE: "three", "price_f1": 0.31, "price_f2": 0.27, "price_f3": 0.22}
@@ -127,8 +127,18 @@ async def test_price_options(hass: HomeAssistant) -> None:
     result = await hass.config_entries.options.async_init(entry.entry_id)
     result = await hass.config_entries.options.async_configure(result["flow_id"], {PRICE_MODE: "single"})
     assert set(result["data_schema"].schema) == {"price"}
-    result = await hass.config_entries.options.async_configure(result["flow_id"], {"price": 0.29})
+    result = await hass.config_entries.options.async_configure(result["flow_id"], {"price": "1.234,5"})
+    assert result["errors"] == {"price": "invalid_price"}  # thousands separators: refused, not guessed
+    result = await hass.config_entries.options.async_configure(result["flow_id"], {"price": "12"})
+    assert result["errors"] == {"price": "invalid_price"}  # more than 10 euro per kWh
+    result = await hass.config_entries.options.async_configure(result["flow_id"], {"price": "0,29"})
     assert entry.options == {PRICE_MODE: "single", "price": 0.29}
+
+    # The stored price is shown as a number with the decimal comma of the server language.
+    hass.config.language = "it"
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(result["flow_id"], {PRICE_MODE: "single"})
+    assert suggested(result, "price") == "0,29"
 
 
 async def test_costs(hass: HomeAssistant) -> None:
@@ -146,9 +156,9 @@ async def test_costs(hass: HomeAssistant) -> None:
         assert result["type"] is FlowResultType.FORM and result["step_id"] == "user"
         return await hass.config_entries.subentries.async_configure(result["flow_id"], user_input)
 
-    result = await add({"name": "Canone RAI", "kind": "yearly", "amount": 90})
+    result = await add({"name": "Canone RAI", "kind": "yearly", "amount": "90"})
     assert result["type"] is FlowResultType.CREATE_ENTRY
-    result = await add({"name": " Oneri di sistema ", "kind": "per_kwh", "amount": 0.041234})
+    result = await add({"name": " Oneri di sistema ", "kind": "per_kwh", "amount": "0,041234"})
     assert result["type"] is FlowResultType.CREATE_ENTRY
     costs = {sub.title: dict(sub.data) for sub in entry.subentries.values()}
     assert costs == {
@@ -156,9 +166,14 @@ async def test_costs(hass: HomeAssistant) -> None:
         "Oneri di sistema": {"name": "Oneri di sistema", "kind": "per_kwh", "amount": 0.041234},
     }
 
-    result = await add({"name": "Troppi decimali", "kind": "monthly", "amount": 0.1234567})
+    result = await add({"name": "Troppi decimali", "kind": "monthly", "amount": "0,1234567"})
     assert result["type"] is FlowResultType.FORM and result["errors"] == {"amount": "too_many_decimals"}
-    result = await add({"name": "   ", "kind": "monthly", "amount": 1})
+    for typed in ("9,15,3", "1.234,56", "nove", ""):
+        result = await add({"name": "Canone", "kind": "monthly", "amount": typed})
+        assert result["errors"] == {"amount": "invalid_number"}, typed
+    result = await add({"name": "Enorme", "kind": "yearly", "amount": "100000,01"})
+    assert result["errors"] == {"amount": "out_of_range"}
+    result = await add({"name": "   ", "kind": "monthly", "amount": "1"})
     assert result["type"] is FlowResultType.FORM and result["errors"] == {"name": "empty_name"}
 
     # Edit one: the form starts from its values.
@@ -166,7 +181,7 @@ async def test_costs(hass: HomeAssistant) -> None:
     result = await entry.start_subentry_reconfigure_flow(hass, subentry_id)
     assert result["step_id"] == "reconfigure"
     result = await hass.config_entries.subentries.async_configure(
-        result["flow_id"], {"name": "Canone TV", "kind": "monthly", "amount": 9}
+        result["flow_id"], {"name": "Canone TV", "kind": "monthly", "amount": "9"}
     )
     assert result["type"] is FlowResultType.ABORT and result["reason"] == "reconfigure_successful"
     assert entry.subentries[subentry_id].title == "Canone TV"
@@ -191,14 +206,14 @@ async def test_cost_per_kw_asks_the_power(hass: HomeAssistant) -> None:
     entry.add_to_hass(hass)
     result = await hass.config_entries.subentries.async_init((entry.entry_id, "cost"), context={"source": "user"})
     result = await hass.config_entries.subentries.async_configure(
-        result["flow_id"], {"name": "Quota potenza", "kind": "per_kw_monthly", "amount": 1.716}
+        result["flow_id"], {"name": "Quota potenza", "kind": "per_kw_monthly", "amount": "1,716"}
     )
     assert result["type"] is FlowResultType.FORM and result["step_id"] == "power"
     assert result["description_placeholders"] == {"name": "Quota potenza"}
     assert suggested(result, "power") is None  # entry not loaded: no power from the customer area
-    result = await hass.config_entries.subentries.async_configure(result["flow_id"], {"power": 4.1234567})
-    assert result["errors"] == {"power": "invalid_power"}  # 0 and negatives are refused by the selector itself
-    result = await hass.config_entries.subentries.async_configure(result["flow_id"], {"power": 4.5})
+    result = await hass.config_entries.subentries.async_configure(result["flow_id"], {"power": "0"})
+    assert result["errors"] == {"power": "invalid_power"}
+    result = await hass.config_entries.subentries.async_configure(result["flow_id"], {"power": "4,5"})
     assert result["type"] is FlowResultType.CREATE_ENTRY
     (subentry_id,) = entry.subentries
     expected = {"name": "Quota potenza", "kind": "per_kw_monthly", "amount": 1.716, "power": 4.5}
@@ -207,17 +222,17 @@ async def test_cost_per_kw_asks_the_power(hass: HomeAssistant) -> None:
     # Edit: the power entered before is suggested.
     result = await entry.start_subentry_reconfigure_flow(hass, subentry_id)
     result = await hass.config_entries.subentries.async_configure(
-        result["flow_id"], {"name": "Quota potenza", "kind": "per_kw_monthly", "amount": 1.8}
+        result["flow_id"], {"name": "Quota potenza", "kind": "per_kw_monthly", "amount": "1.8"}
     )
-    assert result["step_id"] == "power" and suggested(result, "power") == 4.5
-    result = await hass.config_entries.subentries.async_configure(result["flow_id"], {"power": 6})
+    assert result["step_id"] == "power" and suggested(result, "power") == "4.5"
+    result = await hass.config_entries.subentries.async_configure(result["flow_id"], {"power": "6"})
     assert result["type"] is FlowResultType.ABORT and result["reason"] == "reconfigure_successful"
     assert dict(entry.subentries[subentry_id].data) == {**expected, "amount": 1.8, "power": 6.0}
 
     # Changed to a monthly cost: no second step, no power.
     result = await entry.start_subentry_reconfigure_flow(hass, subentry_id)
     result = await hass.config_entries.subentries.async_configure(
-        result["flow_id"], {"name": "Quota fissa", "kind": "monthly", "amount": 9}
+        result["flow_id"], {"name": "Quota fissa", "kind": "monthly", "amount": "9"}
     )
     assert result["type"] is FlowResultType.ABORT
     assert dict(entry.subentries[subentry_id].data) == {"name": "Quota fissa", "kind": "monthly", "amount": 9.0}

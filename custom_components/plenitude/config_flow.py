@@ -20,9 +20,6 @@ from homeassistant.const import CONF_EMAIL, CONF_PASSWORD
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.aiohttp_client import async_create_clientsession
 from homeassistant.helpers.selector import (
-    NumberSelector,
-    NumberSelectorConfig,
-    NumberSelectorMode,
     SelectOptionDict,
     SelectSelector,
     SelectSelectorConfig,
@@ -47,7 +44,8 @@ from .costs import (
     KIND_MONTHLY,
     KIND_PER_KW_MONTHLY,
     CostItem,
-    has_valid_decimals,
+    format_number,
+    parse_number,
 )
 from .texts import text
 
@@ -63,34 +61,26 @@ CREDENTIALS_SCHEMA = vol.Schema(
         ),
     }
 )
-PRICE_SELECTOR = NumberSelector(
-    NumberSelectorConfig(min=0, max=10, step="any", mode=NumberSelectorMode.BOX, unit_of_measurement="€/kWh")
-)
+# Numbers are typed as text and read by ``costs.parse_number``: a number field of the browser treats the decimal
+# comma in its own way (refused, or lost, depending on the browser), while here "9,15" and "9.15" are the same and
+# anything ambiguous gets a clear error.
+PRICE_SELECTOR = TextSelector(TextSelectorConfig(suffix="€/kWh"))
+PRICE_RANGE = (0.0, 10.0)
+AMOUNT_RANGE = (-100000.0, 100000.0)  # negative for discounts and bonuses
+POWER_RANGE = (0.1, 999.0)
 # One form for every kind of cost: the unit stays "€" and the description says "per kWh" or "per kW" where it
 # applies; the costs per kW per month ask the power in a second step.
-# Negative amounts are allowed, for discounts and bonuses. The selector cannot step by 0.000001 (its minimum
-# step is 0.001): the six decimals are checked by the form.
 COST_SCHEMA = vol.Schema(
     {
         vol.Required(COST_NAME): TextSelector(),
         vol.Required(COST_KIND): SelectSelector(
             SelectSelectorConfig(options=list(COST_KINDS), mode=SelectSelectorMode.DROPDOWN, translation_key=COST_KIND)
         ),
-        vol.Required(COST_AMOUNT): NumberSelector(
-            NumberSelectorConfig(
-                min=-100000, max=100000, step="any", mode=NumberSelectorMode.BOX, unit_of_measurement="€"
-            )
-        ),
+        vol.Required(COST_AMOUNT): TextSelector(TextSelectorConfig(suffix="€")),
     }
 )
 
-POWER_SCHEMA = vol.Schema(
-    {
-        vol.Required(COST_POWER): NumberSelector(
-            NumberSelectorConfig(min=0.1, max=999, step="any", mode=NumberSelectorMode.BOX, unit_of_measurement="kW")
-        )
-    }
-)
+POWER_SCHEMA = vol.Schema({vol.Required(COST_POWER): TextSelector(TextSelectorConfig(suffix="kW"))})
 
 
 async def _electric_supplies(hass: HomeAssistant, email: str, password: str) -> list[Supply]:
@@ -261,14 +251,24 @@ class PlenitudeOptionsFlow(OptionsFlowWithReload):
 
     async def async_step_prices(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         fields = PRICE_FIELDS[self._mode]
+        errors: dict[str, str] = {}
         if user_input is not None:
-            return self.async_create_entry(
-                data={PRICE_MODE: self._mode, **{field: float(user_input[field]) for field in fields}}
-            )
+            prices: dict[str, float] = {}
+            for field in fields:
+                price, error = parse_number(user_input.get(field), *PRICE_RANGE)
+                if price is None or error:
+                    errors[field] = "invalid_price"
+                else:
+                    prices[field] = price
+            if not errors:
+                return self.async_create_entry(data={PRICE_MODE: self._mode, **prices})
         current = self.config_entry.options
         schema = vol.Schema({vol.Required(field): PRICE_SELECTOR for field in fields})
-        known = {f: current[f] for f in fields if f in current}
-        return self.async_show_form(step_id="prices", data_schema=self.add_suggested_values_to_schema(schema, known))
+        lang = self.hass.config.language
+        known = user_input or {f: format_number(current[f], lang) for f in fields if f in current}
+        return self.async_show_form(
+            step_id="prices", data_schema=self.add_suggested_values_to_schema(schema, known), errors=errors
+        )
 
 
 class CostSubentryFlow(ConfigSubentryFlow):
@@ -292,21 +292,29 @@ class CostSubentryFlow(ConfigSubentryFlow):
         """Data of the cost being edited, empty for a new one."""
         return dict(self._get_reconfigure_subentry().data) if self.source == "reconfigure" else {}
 
+    def _shown(self, data: dict[str, Any]) -> dict[str, Any]:
+        """Stored numbers as the form shows them (decimal comma in Italian)."""
+        lang = self.hass.config.language
+        return {
+            key: format_number(value, lang) if key in (COST_AMOUNT, COST_POWER) and value is not None else value
+            for key, value in data.items()
+        }
+
     async def _form(self, step_id: str, user_input: dict[str, Any] | None) -> SubentryFlowResult:
         errors: dict[str, str] = {}
         if user_input is not None:
             name = str(user_input[COST_NAME]).strip()
-            amount = float(user_input[COST_AMOUNT])
+            amount, error = parse_number(user_input.get(COST_AMOUNT), *AMOUNT_RANGE)
             if not name:
                 errors[COST_NAME] = "empty_name"
-            elif not has_valid_decimals(amount):
-                errors[COST_AMOUNT] = "too_many_decimals"
-            else:
+            if amount is None or error:
+                errors[COST_AMOUNT] = error or "invalid_number"
+            if amount is not None and not errors:
                 self._cost = CostItem(name=name, kind=user_input[COST_KIND], amount=amount)
                 if self._cost.kind == KIND_PER_KW_MONTHLY:
                     return await self.async_step_power()
                 return self._save(self._cost)
-        suggested = user_input or self._editing() or {COST_KIND: KIND_MONTHLY}
+        suggested = user_input or self._shown(self._editing()) or {COST_KIND: KIND_MONTHLY}
         return self.async_show_form(
             step_id=step_id, data_schema=self.add_suggested_values_to_schema(COST_SCHEMA, suggested), errors=errors
         )
@@ -316,15 +324,15 @@ class CostSubentryFlow(ConfigSubentryFlow):
         assert self._cost is not None
         errors: dict[str, str] = {}
         if user_input is not None:
-            power = float(user_input[COST_POWER])
-            if not 0 < power < 1000 or not has_valid_decimals(power):
+            power, error = parse_number(user_input.get(COST_POWER), *POWER_RANGE)
+            if power is None or error:
                 errors[COST_POWER] = "invalid_power"
             else:
                 return self._save(
                     CostItem(name=self._cost.name, kind=self._cost.kind, amount=self._cost.amount, power=power)
                 )
         known = self._editing().get(COST_POWER) or self._portal_power()
-        suggested = user_input or ({COST_POWER: known} if known else {})
+        suggested = user_input or ({COST_POWER: format_number(known, self.hass.config.language)} if known else {})
         return self.async_show_form(
             step_id="power",
             data_schema=self.add_suggested_values_to_schema(POWER_SCHEMA, suggested),

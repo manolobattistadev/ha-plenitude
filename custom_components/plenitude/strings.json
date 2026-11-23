@@ -52,7 +52,7 @@
       },
       "prices": {
         "title": "Prices per kWh",
-        "description": "Prices of the energy in euro per kWh, as in your offer. Charges per kWh that are not in these prices (transport, system charges, excise duty) can be added as costs per kWh.",
+        "description": "Prices of the energy in euro per kWh, as in your offer, with a comma or a point for the decimals. Charges per kWh that are not in these prices (transport, system charges, excise duty) can be added as costs per kWh.",
         "data": {
           "price": "Single price",
           "price_f1": "Band F1",
@@ -68,6 +68,9 @@
           "price_f23": "Euro per kWh in every hour outside F1."
         }
       }
+    },
+    "error": {
+      "invalid_price": "Enter a price between 0 and 10 euro per kWh, with a comma or a point for the decimals (at most 6), without thousands separators."
     }
   },
   "selector": {
@@ -141,7 +144,7 @@
           "data_description": {
             "name": "Any text, for example: TV licence, fixed fee, power fee, system charges.",
             "kind": "How the amount is charged: every month, every two months, every year, every month for each kW of the contract power (power fee), or for each kWh consumed.",
-            "amount": "Euro, at most 6 decimals: euro per kWh for the costs per kWh, euro per kW for the costs per kW per month. Use a negative amount for a discount."
+            "amount": "Euro, with a comma or a point for the decimals (at most 6): euro per kWh for the costs per kWh, euro per kW for the costs per kW per month. Use a negative amount for a discount."
           }
         },
         "reconfigure": {
@@ -154,7 +157,7 @@
           "data_description": {
             "name": "Any text, for example: TV licence, fixed fee, power fee, system charges.",
             "kind": "How the amount is charged: every month, every two months, every year, every month for each kW of the contract power (power fee), or for each kWh consumed.",
-            "amount": "Euro, at most 6 decimals: euro per kWh for the costs per kWh, euro per kW for the costs per kW per month. Use a negative amount for a discount."
+            "amount": "Euro, with a comma or a point for the decimals (at most 6): euro per kWh for the costs per kWh, euro per kW for the costs per kW per month. Use a negative amount for a discount."
           }
         },
         "power": {
@@ -164,14 +167,16 @@
             "power": "Power"
           },
           "data_description": {
-            "power": "kW, for example 3, 4.5 or 6."
+            "power": "kW, for example 3, 4,5 or 6."
           }
         }
       },
       "error": {
         "empty_name": "Enter a name.",
+        "invalid_number": "Enter a number, with a comma or a point for the decimals (for example 9,15 or 9.15), without thousands separators.",
         "too_many_decimals": "At most 6 decimals.",
-        "invalid_power": "Enter a power between 0.1 and 999 kW, with at most 6 decimals."
+        "out_of_range": "The amount must be between -100000 and 100000 euro.",
+        "invalid_power": "Enter a power between 0.1 and 999 kW, with a comma or a point for the decimals (at most 6)."
       },
       "abort": {
         "reconfigure_successful": "Cost updated."

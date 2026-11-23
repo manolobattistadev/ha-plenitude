@@ -340,7 +340,7 @@ async def test_costs_per_kwh_follow_the_subentries(
 
     result = await hass.config_entries.subentries.async_init((entry.entry_id, "cost"), context={"source": "user"})
     await hass.config_entries.subentries.async_configure(
-        result["flow_id"], {"name": "Oneri", "kind": "per_kwh", "amount": 0.05}
+        result["flow_id"], {"name": "Oneri", "kind": "per_kwh", "amount": "0,05"}
     )
     await settle()
     energy = await rows(hass, ENERGY)
@@ -360,7 +360,7 @@ async def test_costs_per_kwh_follow_the_subentries(
     (subentry_id,) = entry.subentries
     result = await entry.start_subentry_reconfigure_flow(hass, subentry_id)
     await hass.config_entries.subentries.async_configure(
-        result["flow_id"], {"name": "Oneri", "kind": "per_kwh", "amount": 0.1}
+        result["flow_id"], {"name": "Oneri", "kind": "per_kwh", "amount": "0.1"}
     )
     await settle()
     assert (await rows(hass, COST))[-1]["sum"] == pytest.approx(energy[-1]["sum"] * 0.3)
@@ -553,8 +553,8 @@ async def test_cost_per_kw_suggests_the_power_of_the_contract(
     entry = await setup(hass, {PRICE_MODE: "none"})
     result = await hass.config_entries.subentries.async_init((entry.entry_id, "cost"), context={"source": "user"})
     result = await hass.config_entries.subentries.async_configure(
-        result["flow_id"], {"name": "Quota potenza", "kind": "per_kw_monthly", "amount": 1.716}
+        result["flow_id"], {"name": "Quota potenza", "kind": "per_kw_monthly", "amount": "1,716"}
     )
     assert result["step_id"] == "power"
     (power,) = result["data_schema"].schema
-    assert power.description == {"suggested_value": 4.5}
+    assert power.description == {"suggested_value": "4.5"}

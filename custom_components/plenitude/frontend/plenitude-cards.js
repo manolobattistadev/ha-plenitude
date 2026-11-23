@@ -7,8 +7,9 @@
  *                                      so far, bands, estimate at the end of the period
  *
  * Costs: the cost statistic is kWh x (price of the band + costs per kWh). The periodic costs entered in the
- * integration (monthly, two-monthly, yearly, per kW per month) are spread by the cards over the days (euro per
- * year / days of the year), from the first to the last day with data.
+ * integration (monthly, two-monthly, yearly, per kW per month) count in full, as entered: every month carries
+ * 1/12 of their euro per year, split among its days; a billing period carries its months in full, also before
+ * it is over (9 euro a month: 18 euro in a two-month bill).
  * Texts in Italian and English, following the language of the user's profile.
  *
  * The statistics change about once a day, when the integration imports new days: what the cards read is kept
@@ -21,7 +22,7 @@
  * and hand-drawn SVG. Text that comes from outside (category names) is always set with textContent.
  */
 
-const CARD_VERSION = "0.4.0";
+const CARD_VERSION = "0.4.1";
 
 // ------------------------------------------------------------------------------------------- language
 
@@ -75,7 +76,7 @@ const STRINGS = {
     estimate_note: "media dei giorni con dati × durata del periodo",
     choose_start: "Scegli nelle impostazioni della card il primo giorno di un periodo di fatturazione.",
     cost_note:
-      "Il costo è kWh × (prezzo della fascia + costi per kWh), più i costi periodici (mensili, bimestrali, annuali, €/kW al mese) ripartiti per giorno, come impostati nell'integrazione. È una stima: la bolletta può contenere anche conguagli e letture stimate.",
+      "Il costo è kWh × (prezzo della fascia + costi per kWh), più i costi periodici (mensili, bimestrali, annuali, €/kW al mese) per intero, come impostati nell'integrazione: quelli di tutto il periodo, anche se non è finito. È una stima: la bolletta può contenere anche conguagli e letture stimate.",
     future: "periodo futuro",
     period_total: "Totale del periodo",
     when: "Quando",
@@ -147,7 +148,7 @@ const STRINGS = {
     estimate_note: "average of the days with data × length of the period",
     choose_start: "Choose the first day of a billing period in the card settings.",
     cost_note:
-      "The cost is kWh × (price of the band + costs per kWh), plus the periodic costs (monthly, two-monthly, yearly, per kW per month) spread over the days, as set in the integration. It is an estimate: the bill may also contain adjustments and estimated readings.",
+      "The cost is kWh × (price of the band + costs per kWh), plus the periodic costs (monthly, two-monthly, yearly, per kW per month) in full, as set in the integration: those of the whole period, also while it is not over. It is an estimate: the bill may also contain adjustments and estimated readings.",
     future: "future period",
     period_total: "Period total",
     when: "When",
@@ -231,28 +232,44 @@ const periodicCosts = (entry) => (entry.costs || []).filter((c) => yearlyOf(c) !
 const perKwhCosts = (entry) => (entry.costs || []).filter((c) => c.kind === "per_kwh");
 const perKwhExtra = (entry) => perKwhCosts(entry).reduce((a, c) => a + Number(c.amount), 0);
 
+/** Euro a month of the periodic costs (all of them, or ``items``): 1/12 of their euro per year. */
+const monthlyFixed = (entry, items = periodicCosts(entry)) => items.reduce((a, c) => a + (yearlyOf(c) || 0), 0) / 12;
+
 /**
- * Share of the periodic costs (all of them, or ``items``) in each bucket: ``euro per year / days of the year`` per
- * day, for the days from the first day of the history to ``until`` (by default the last day with
- * data), split by the hours of the bucket on the day view (23, 24 or 25 per day). ``null`` where nothing
- * applies, like the statistics.
+ * Periodic costs in each bucket, as entered: every calendar month from the month of the first day of the history
+ * to the month of the last day with data carries 1/12 of the euro per year, split evenly among its days (and among
+ * the real hours of a day: 23, 24 or 25). A month gets exactly its amount, also while it is not over; a year the
+ * sum of its months; a week the share of its days. ``null`` where nothing applies, like the statistics.
  */
-function fixedShares(entry, buckets, until = entry.last_day ? parseDay(entry.last_day) : null, items = periodicCosts(entry)) {
-  const yearly = items.reduce((a, c) => a + (yearlyOf(c) || 0), 0);
-  if (!yearly || !entry.prices || !until) return buckets.map(() => null);
-  const first = entry.first_day ? parseDay(entry.first_day).getTime() : -Infinity;
-  const stop = addDays(until, 1).getTime();
+function fixedShares(entry, buckets, items = periodicCosts(entry)) {
+  const monthly = monthlyFixed(entry, items);
+  if (!monthly || !entry.prices || !entry.last_day) return buckets.map(() => null);
+  const last = parseDay(entry.last_day);
+  const first = entry.first_day ? parseDay(entry.first_day) : null;
+  const from = first ? new Date(first.getFullYear(), first.getMonth(), 1).getTime() : -Infinity;
+  const to = new Date(last.getFullYear(), last.getMonth() + 1, 1).getTime();
   return buckets.map((bucket) => {
     let total = null;
     for (let day = startOfDay(new Date(bucket.start)); day.getTime() < bucket.end; day = addDays(day, 1)) {
       const dayStart = day.getTime();
       const dayEnd = addDays(day, 1).getTime();
-      if (dayStart < first || dayStart >= stop) continue;
+      if (dayStart < from || dayStart >= to) continue;
       const overlap = Math.min(bucket.end, dayEnd) - Math.max(bucket.start, dayStart);
-      if (overlap > 0) total = (total || 0) + (yearly / daysInYear(day.getFullYear())) * (overlap / (dayEnd - dayStart));
+      const perDay = monthly / daysInMonth(day.getFullYear(), day.getMonth());
+      if (overlap > 0) total = (total || 0) + perDay * (overlap / (dayEnd - dayStart));
     }
     return total;
   });
+}
+
+/**
+ * Periodic costs of a billing period of ``months`` months, as entered: the euro a month times the months of the
+ * period, also while the period is not over. Nothing for a period that ends before the history starts.
+ */
+function billingFixed(entry, period, months, items = periodicCosts(entry)) {
+  if (!entry.prices) return 0;
+  if (entry.first_day && period.end <= parseDay(entry.first_day)) return 0;
+  return monthlyFixed(entry, items) * months;
 }
 const sumValues = (values) => (values || []).reduce((a, v) => a + (v || 0), 0);
 
@@ -1168,13 +1185,12 @@ class PlenitudeBillingCard extends PlenitudeBase {
     const kwhDaily = changes[s.consumo];
     const sum = sumValues;
     const kwh = sum(kwhDaily);
-    // Cost of the consumption (energy + costs per kWh, the cost statistic) and periodic costs so far (up to the
-    // last day with data) and for the whole period, for the estimate.
+    // Cost of the consumption so far (energy + costs per kWh, the cost statistic), plus the periodic costs of the
+    // whole period as entered: the bill charges them in full (split evenly among the days for the columns).
     const usageEur = s.costo ? sum(changes[s.costo]) : null;
-    const fixedDaily = fixedShares(entry, range.buckets);
-    const fixedSoFar = sum(fixedDaily);
-    const fixedPeriod = sum(fixedShares(entry, range.buckets, addDays(period.end, -1)));
-    const eur = usageEur !== null ? usageEur + fixedSoFar : null;
+    const fixedPeriod = billingFixed(entry, period, this._config.months);
+    const fixedDaily = range.buckets.map(() => (fixedPeriod ? fixedPeriod / range.buckets.length : null));
+    const eur = usageEur !== null ? usageEur + fixedPeriod : null;
     const costOfDay = (i) => {
       const energy = s.costo ? changes[s.costo][i] : null;
       return energy === null && fixedDaily[i] === null ? null : (energy || 0) + (fixedDaily[i] || 0);
@@ -1254,7 +1270,7 @@ class PlenitudeBillingCard extends PlenitudeBase {
       const kind = (c) => tr(lang, `kind_${c.kind}`) + (c.kind === "per_kw_monthly" && c.power ? `, ${f.number(c.power)} kW` : "");
       const rows = [[tr(lang, "energy_cost"), null, usageEur - kwh * perKwhExtra(entry)]];
       for (const c of perKwhCosts(entry)) rows.push([c.name, kind(c), kwh * Number(c.amount)]);
-      for (const c of periodicCosts(entry)) rows.push([c.name, kind(c), sum(fixedShares(entry, range.buckets, undefined, [c]))]);
+      for (const c of periodicCosts(entry)) rows.push([c.name, kind(c), billingFixed(entry, period, this._config.months, [c])]);
       const line = ([name, kindText, value]) =>
         el("tr", {}, [el("td", {}, [name, kindText ? el("span", { class: "kind", text: ` · ${kindText}` }) : null]), el("td", { text: f.eur(value) })]);
       children.push(

@@ -12,6 +12,7 @@ Like ``api`` and ``bands``, this module does not import Home Assistant.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
@@ -68,6 +69,38 @@ class CostItem:
             return None
         factor = (self.power or 0.0) if self.kind == KIND_PER_KW_MONTHLY else 1.0
         return self.amount * factor * times
+
+
+# A number as people type it: comma or point for the decimals, one of them at most, no thousands separators.
+_NUMBER = re.compile(r"[+-]?(?:\d+(?:[.,]\d*)?|[.,]\d+)")
+
+
+def parse_number(value: object, minimum: float, maximum: float) -> tuple[float | None, str | None]:
+    """A number typed in a form, with a comma or a point for the decimals (``9,15`` or ``9.15``); a euro sign and
+    spaces around it are ignored. Returns the number and no error, or no number and the key of the error:
+    ``invalid_number`` (not a number, or with thousands separators: ``1.234,56`` is refused rather than guessed),
+    ``too_many_decimals`` (more than six), ``out_of_range`` (outside ``minimum``..``maximum``)."""
+    if isinstance(value, bool) or not isinstance(value, str | int | float):
+        return None, "invalid_number"
+    text = str(value).replace("\u00a0", " ").strip().removeprefix("€").removesuffix("€").strip()
+    if not _NUMBER.fullmatch(text):
+        return None, "invalid_number"
+    text = text.replace(",", ".")
+    if len(text.partition(".")[2]) > AMOUNT_DECIMALS:
+        return None, "too_many_decimals"
+    number = float(text)
+    if not minimum <= number <= maximum:
+        return None, "out_of_range"
+    return number, None
+
+
+def format_number(value: float | None, language: str) -> str | None:
+    """A stored number shown in a form: no trailing zeros, decimal comma in Italian."""
+    if value is None:
+        return None
+    text = f"{value:.{AMOUNT_DECIMALS}f}".rstrip("0").rstrip(".")
+    text = "0" if text == "-0" else text
+    return text.replace(".", ",") if language.lower().startswith("it") else text
 
 
 def has_valid_decimals(amount: float) -> bool:

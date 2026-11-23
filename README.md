@@ -85,8 +85,9 @@ Plenitude does not expose the price of your offer, so the cost is computed from 
 **Other costs.** In the same page select **Add cost**, as many times as you need. Each cost has:
 - **Name**: free text, for example TV licence, fixed fee, power fee, system charges;
 - **Type**: monthly, every two months, yearly, per kW per month or per kWh;
-- **Amount**: in euro (euro per kWh for the costs per kWh, euro per kW for the costs per kW per month), at most 6
-  decimals. Use a negative amount for a discount.
+- **Amount**: in euro (euro per kWh for the costs per kWh, euro per kW for the costs per kW per month), with a
+  comma or a point for the decimals (`9,15` or `9.15`), at most 6 decimals, no thousands separators. Use a
+  negative amount for a discount. Prices follow the same rule.
 - **Power**, only for the costs per kW per month (the power fee of the bill, *quota potenza*): the power of the
   contract in kW, as in the bill (*potenza impegnata*). The value of the customer area is suggested when it is
   known.
@@ -98,9 +99,12 @@ How they are counted:
   in the sensor and in the cards. When prices or costs per kWh change, the cost of the whole history is
   recomputed.
 - **Monthly, two-monthly, yearly and per kW per month** costs do not depend on the hours, so they are **not** in
-  the cost statistic nor in the Energy dashboard. The cards spread them over the days: `euro a year / days of the
-  year`, where euro a year is the amount × 12 for monthly, × 6 for two-monthly, × 1 for yearly and × power × 12 for
-  the costs per kW per month, from the first to the last day with data. The current bill card lists every cost.
+  the cost statistic nor in the Energy dashboard. The cards count them **in full, as entered**: every month
+  carries 1/12 of their euro a year (amount × 12 for monthly, × 6 for two-monthly, × 1 for yearly, × power × 12
+  for the costs per kW per month), split among its days, from the month of the first day with data to the month
+  of the last one. A month shows its whole amount also while it is not over. The current bill card counts all
+  the months of the period, also before it ends (a TV licence of 9 euro a month is 18 euro in a two-month bill),
+  and lists every cost.
 
 **Getting close to the bill.** Use the energy price of your offer as the price, then add the other lines of a bill
 as costs: transport, system charges and excise duty per kWh; fixed fee and TV licence as periodic costs; the power
@@ -266,9 +270,12 @@ To report a vulnerability, see [SECURITY.md](SECURITY.md).
   again for the missing days of the last two weeks, once a day.
 - **The sensors stay *unknown* after the first configuration.** The first import is still running: the last two
   weeks appear within seconds, the rest in a few minutes (log: *Plenitude: first import, …*).
-- **The cards do not appear** in *Add card*. Make sure the integration is loaded, then reload the page without
-  the cache (or clear the cache of the companion app). Do not add the cards as dashboard resources: the
-  integration loads them.
+- **The cards do not appear** in *Add card*, or a dashboard shows *Custom element doesn't exist:
+  plenitude-…-card*. The integration adds the cards when Home Assistant starts, and the frontend reads them only
+  when the page loads: a page loaded while Home Assistant was starting does not have them. Reload the page once
+  Home Assistant has started (without the cache, or clear the cache of the companion app). If they are still
+  missing, open `/plenitude_static/plenitude-cards.js` on your Home Assistant: it must show the code of the cards
+  with the version at the top. Do not add the cards as dashboard resources: the integration loads them.
 - **The cost differs from the bill.** See [Prices and costs](#prices-and-costs): enter every line of the bill as a
   cost, VAT included. Bills may also contain adjustments and estimated readings.
 

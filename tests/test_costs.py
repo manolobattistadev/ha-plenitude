@@ -7,9 +7,11 @@ import pytest
 from custom_components.plenitude.costs import (
     CostItem,
     cost_signature,
+    format_number,
     has_cost,
     has_valid_decimals,
     hour_price,
+    parse_number,
     per_kwh_extra,
 )
 
@@ -70,3 +72,35 @@ def test_power_is_kept_only_for_the_costs_per_kw() -> None:
 def test_costs_per_kw_do_not_rebuild_the_history() -> None:
     base = cost_signature(SINGLE, [])
     assert cost_signature(SINGLE, [CostItem("Quota potenza", "per_kw_monthly", 1.5, power=3)]) == base
+
+
+@pytest.mark.parametrize(
+    ("typed", "number", "error"),
+    [
+        ("9,15", 9.15, None),
+        ("9.15", 9.15, None),
+        (" € 9,15 ", 9.15, None),
+        ("9,15 €", 9.15, None),
+        ("-5", -5.0, None),
+        (",5", 0.5, None),
+        ("0,123456", 0.123456, None),
+        ("0,1234567", None, "too_many_decimals"),
+        ("1.234,56", None, "invalid_number"),  # thousands separators: refused, not guessed
+        ("1,2,3", None, "invalid_number"),
+        ("1e3", None, "invalid_number"),
+        ("nove", None, "invalid_number"),
+        ("", None, "invalid_number"),
+        ("100", None, "out_of_range"),
+        (9.5, 9.5, None),  # numbers from older forms or tests
+    ],
+)
+def test_numbers_with_comma_or_point(typed, number, error) -> None:
+    assert parse_number(typed, -10, 10) == (number, error)
+
+
+@pytest.mark.parametrize(
+    ("value", "language", "shown"),
+    [(9.15, "it", "9,15"), (9.15, "en", "9.15"), (90.0, "it", "90"), (0.000001, "it", "0,000001"), (-0.0, "it", "0")],
+)
+def test_numbers_shown_in_the_forms(value, language, shown) -> None:
+    assert format_number(value, language) == shown

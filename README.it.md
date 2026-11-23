@@ -85,8 +85,9 @@ Plenitude non espone il prezzo della tua offerta, quindi il costo si calcola dai
 **Altri costi.** Nella stessa pagina scegli **Aggiungi costo**, tutte le volte che serve. Ogni costo ha:
 - **Nome**: un testo libero, per esempio canone RAI, quota fissa, quota potenza, oneri di sistema;
 - **Tipologia**: mensile, bimestrale, annuale, €/kW al mese o per kWh;
-- **Importo**: in euro (euro per kWh per i costi per kWh, euro per kW per i costi in €/kW al mese), al massimo 6
-  decimali. Per uno sconto usa un importo negativo.
+- **Importo**: in euro (euro per kWh per i costi per kWh, euro per kW per i costi in €/kW al mese), con la virgola
+  o il punto per i decimali (`9,15` o `9.15`), al massimo 6 decimali, senza separatori delle migliaia. Per uno
+  sconto usa un importo negativo. Lo stesso vale per i prezzi.
 - **Potenza**, solo per i costi in €/kW al mese (la quota potenza della bolletta): la potenza del contratto in kW,
   come in bolletta (potenza impegnata). Se l'area clienti la indica, è già proposta.
 
@@ -97,10 +98,12 @@ Come vengono contati:
   Energia, nel sensore e nelle card. Quando cambiano i prezzi o i costi per kWh, il costo di tutto lo storico
   viene ricalcolato.
 - I costi **mensili, bimestrali, annuali e in €/kW al mese** non dipendono dalle ore, quindi **non** sono nella
-  statistica del costo né nella dashboard Energia. Le card li ripartiscono sui giorni: `euro all'anno / giorni
-  dell'anno`, dove gli euro all'anno sono l'importo × 12 per i mensili, × 6 per i bimestrali, × 1 per gli annuali e
-  × potenza × 12 per i costi in €/kW al mese, dal primo all'ultimo giorno con dati. La card della bolletta in corso
-  elenca ogni costo.
+  statistica del costo né nella dashboard Energia. Le card li contano **per intero, come inseriti**: ogni mese
+  porta 1/12 dei loro euro all'anno (importo × 12 per i mensili, × 6 per i bimestrali, × 1 per gli annuali,
+  × potenza × 12 per i costi in €/kW al mese), diviso tra i suoi giorni, dal mese del primo giorno con dati al mese
+  dell'ultimo. Un mese mostra il suo importo intero anche se non è finito. La card della bolletta in corso conta
+  tutti i mesi del periodo, anche prima che finisca (un canone TV di 9 euro al mese vale 18 euro in una bolletta
+  bimestrale), ed elenca ogni costo.
 
 **Avvicinarsi alla bolletta.** Come prezzo usa quello dell'energia della tua offerta, poi aggiungi come costi le
 altre voci di una bolletta: trasporto, oneri di sistema e accise per kWh; quota fissa e canone RAI come costi
@@ -266,9 +269,12 @@ Per segnalare una vulnerabilità vedi [SECURITY.md](SECURITY.md).
   di nuovo i giorni mancanti delle ultime due settimane, una volta al giorno.
 - **Dopo la prima configurazione i sensori restano *sconosciuto*.** Il primo import è ancora in corso: le ultime
   due settimane compaiono in pochi secondi, il resto in qualche minuto (nel log: *Plenitude: first import, …*).
-- **Le card non compaiono** in *Aggiungi card*. Controlla che l'integrazione sia caricata, poi ricarica la pagina
-  senza cache (o svuota la cache dell'app). Non aggiungere le card alle risorse della dashboard: le carica
-  l'integrazione.
+- **Le card non compaiono** in *Aggiungi card*, o una dashboard mostra *Custom element doesn't exist:
+  plenitude-…-card*. L'integrazione aggiunge le card quando Home Assistant si avvia, e il frontend le legge solo
+  quando la pagina si carica: una pagina caricata mentre Home Assistant si stava avviando non le ha. Ricarica la
+  pagina ad avvio finito (senza cache, o svuota la cache dell'app). Se mancano ancora, apri
+  `/plenitude_static/plenitude-cards.js` sul tuo Home Assistant: deve mostrare il codice delle card con la versione
+  in cima. Non aggiungere le card alle risorse della dashboard: le carica l'integrazione.
 - **Il costo è diverso dalla bolletta.** Vedi [Prezzi e costi](#prezzi-e-costi): inserisci ogni voce della
   bolletta come costo, IVA compresa. Le bollette possono contenere anche conguagli e letture stimate.
 

@@ -52,7 +52,7 @@
       },
       "prices": {
         "title": "Prezzi per kWh",
-        "description": "Prezzi dell'energia in euro per kWh, come nella tua offerta. Gli oneri per kWh che non sono in questi prezzi (trasporto, oneri di sistema, accise) si possono aggiungere come costi per kWh.",
+        "description": "Prezzi dell'energia in euro per kWh, come nella tua offerta, con la virgola o il punto per i decimali. Gli oneri per kWh che non sono in questi prezzi (trasporto, oneri di sistema, accise) si possono aggiungere come costi per kWh.",
         "data": {
           "price": "Prezzo unico",
           "price_f1": "Fascia F1",
@@ -68,6 +68,9 @@
           "price_f23": "Euro per kWh in tutte le ore fuori dalla F1."
         }
       }
+    },
+    "error": {
+      "invalid_price": "Inserisci un prezzo tra 0 e 10 euro per kWh, con la virgola o il punto per i decimali (al massimo 6), senza separatori delle migliaia."
     }
   },
   "selector": {
@@ -141,7 +144,7 @@
           "data_description": {
             "name": "Un testo libero, per esempio: canone RAI, quota fissa, quota potenza, oneri di sistema.",
             "kind": "Come si paga l'importo: ogni mese, ogni due mesi, ogni anno, ogni mese per ogni kW di potenza del contratto (quota potenza) o per ogni kWh consumato.",
-            "amount": "Euro, al massimo 6 decimali: euro per kWh per i costi per kWh, euro per kW per i costi in €/kW al mese. Per uno sconto usa un importo negativo."
+            "amount": "Euro, con la virgola o il punto per i decimali (al massimo 6): euro per kWh per i costi per kWh, euro per kW per i costi in €/kW al mese. Per uno sconto usa un importo negativo."
           }
         },
         "reconfigure": {
@@ -154,7 +157,7 @@
           "data_description": {
             "name": "Un testo libero, per esempio: canone RAI, quota fissa, quota potenza, oneri di sistema.",
             "kind": "Come si paga l'importo: ogni mese, ogni due mesi, ogni anno, ogni mese per ogni kW di potenza del contratto (quota potenza) o per ogni kWh consumato.",
-            "amount": "Euro, al massimo 6 decimali: euro per kWh per i costi per kWh, euro per kW per i costi in €/kW al mese. Per uno sconto usa un importo negativo."
+            "amount": "Euro, con la virgola o il punto per i decimali (al massimo 6): euro per kWh per i costi per kWh, euro per kW per i costi in €/kW al mese. Per uno sconto usa un importo negativo."
           }
         },
         "power": {
@@ -170,8 +173,10 @@
       },
       "error": {
         "empty_name": "Inserisci un nome.",
+        "invalid_number": "Scrivi un numero, con la virgola o il punto per i decimali (per esempio 9,15 o 9.15), senza separatori delle migliaia.",
         "too_many_decimals": "Al massimo 6 decimali.",
-        "invalid_power": "Inserisci una potenza tra 0,1 e 999 kW, con al massimo 6 decimali."
+        "out_of_range": "L'importo deve essere tra -100000 e 100000 euro.",
+        "invalid_power": "Inserisci una potenza tra 0,1 e 999 kW, con la virgola o il punto per i decimali (al massimo 6)."
       },
       "abort": {
         "reconfigure_successful": "Costo aggiornato."

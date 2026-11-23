@@ -19,7 +19,7 @@ const sandbox = {
 };
 vm.createContext(sandbox);
 vm.runInContext(source, sandbox);
-const { billingPeriod, periodRange, buildSeries, seriesValues, fixedShares, categoryName } = sandbox;
+const { billingPeriod, periodRange, buildSeries, seriesValues, fixedShares, billingFixed, categoryName } = sandbox;
 
 const day = (y, m, d) => new Date(y, m - 1, d);
 const ymd = (date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
@@ -84,40 +84,62 @@ test("bands in EUR use the price of each band; two-band contracts show F1 and F2
   assert.equal(values[0].values[1], null); // no data stays "no data", not zero
 });
 
-test("periodic costs: euro per year / days of the year, from the first to the last day with data", () => {
+test("periodic costs count in full: every month carries 1/12 of the euro per year, split among its days", () => {
   // ``yearly`` as the integration sends it (plenitude/info): amount x times a year, x power for the costs per kW.
   const entry = {
     prices: { f1: 0.3, f2: 0.3, f3: 0.3 },
     costs: [
-      { name: "Monthly", kind: "monthly", amount: 9.125, yearly: 109.5 },
-      { name: "Two-monthly", kind: "bimonthly", amount: 18.25, yearly: 109.5 },
-      { name: "Power", kind: "per_kw_monthly", amount: 1.825, power: 5, yearly: 109.5 },
-      { name: "Yearly", kind: "yearly", amount: 36.5, yearly: 36.5 },
+      { name: "Canone TV", kind: "monthly", amount: 9, yearly: 108 },
+      { name: "Bimestrale", kind: "bimonthly", amount: 12, yearly: 72 },
+      { name: "Quota potenza", kind: "per_kw_monthly", amount: 2, power: 3, yearly: 72 },
+      { name: "Annuale", kind: "yearly", amount: 36, yearly: 36 },
       { name: "Per kWh", kind: "per_kwh", amount: 0.05, yearly: null },
     ],
     first_day: "2026-01-04",
     last_day: "2026-11-20",
   };
-  const perDay = (109.5 * 3 + 36.5) / 365; // 1.0 EUR a day in 2026; per kWh costs excluded
-  const november = periodRange("month", day(2026, 11, 10));
-  const shares = fixedShares(entry, november.buckets);
-  assert.ok(Math.abs(shares[0] - perDay) < 1e-9);
-  assert.ok(Math.abs(shares[19] - perDay) < 1e-9); // the 20th, last day with data
-  assert.equal(shares[20], null); // nothing after the last day with data
-  const january = fixedShares(entry, periodRange("month", day(2026, 1, 10)).buckets);
-  assert.equal(january[2], null); // before the history
-  assert.ok(Math.abs(january[3] - perDay) < 1e-9);
-  // Whole period on request (estimate at the end of the period), and one item alone (cost breakdown).
-  const full = fixedShares(entry, november.buckets, day(2026, 11, 30));
-  assert.ok(Math.abs(full.reduce((a, v) => a + v, 0) - 30 * perDay) < 1e-9);
-  const yearlyOnly = fixedShares(entry, november.buckets, undefined, [entry.costs[3]]);
-  assert.ok(Math.abs(yearlyOnly[0] - 0.1) < 1e-9);
-  // Day view: split by the real hours of the day, 25 on 25 October.
+  const monthly = (108 + 72 + 72 + 36) / 12; // 24 EUR a month; per kWh costs excluded
+  const total = (values) => values.reduce((a, v) => a + (v || 0), 0);
+  const close = (a, b) => assert.ok(Math.abs(a - b) < 1e-9, `${a} != ${b}`);
+  // The current month in full, also its days after the last day with data.
+  const november = fixedShares(entry, periodRange("month", day(2026, 11, 10)).buckets);
+  close(total(november), monthly);
+  close(november[29], monthly / 30);
+  // February: the same amount over 28 days; the first month of the history in full.
+  close(total(fixedShares(entry, periodRange("month", day(2026, 2, 10)).buckets)), monthly);
+  close(total(fixedShares(entry, periodRange("month", day(2026, 1, 10)).buckets)), monthly);
+  // Nothing after the month of the last day with data, nothing before the month of the first day.
+  assert.equal(total(fixedShares(entry, periodRange("month", day(2026, 12, 10)).buckets)), 0);
+  assert.equal(fixedShares(entry, periodRange("month", day(2025, 12, 10)).buckets)[0], null);
+  // Year view: one column per month, January to November.
+  const year = fixedShares(entry, periodRange("year", day(2026, 6, 1)).buckets);
+  close(year[0], monthly);
+  close(year[10], monthly);
+  assert.equal(year[11], null);
+  // One item alone (the monthly TV licence): 9 EUR in November.
+  close(total(fixedShares(entry, periodRange("month", day(2026, 11, 10)).buckets, [entry.costs[0]])), 9);
+  // Day view: the share of the day, split by its real hours, 25 on 25 October.
   const longDay = fixedShares(entry, periodRange("day", day(2026, 10, 25)).buckets);
   assert.equal(longDay.length, 25);
-  assert.ok(Math.abs(longDay.reduce((a, v) => a + v, 0) - perDay) < 1e-9);
+  close(total(longDay), monthly / 31);
   // No cost at all: nothing.
-  assert.equal(fixedShares({ ...entry, prices: null }, november.buckets)[0], null);
+  assert.equal(fixedShares({ ...entry, prices: null }, periodRange("month", day(2026, 11, 10)).buckets)[0], null);
+});
+
+test("billing period: the periodic costs of all its months, also before it is over", () => {
+  const entry = {
+    prices: { f1: 0.3, f2: 0.3, f3: 0.3 },
+    costs: [{ name: "Canone TV", kind: "monthly", amount: 9, yearly: 108 }],
+    first_day: "2026-01-04",
+    last_day: "2026-11-21",
+  };
+  const current = billingPeriod(day(2026, 1, 1), 2, day(2026, 11, 23)); // 1 November - 1 January
+  assert.ok(Math.abs(billingFixed(entry, current, 2) - 18) < 1e-9); // 9 EUR a month, two months: 18 EUR
+  const fromThe15th = billingPeriod(day(2026, 1, 15), 2, day(2026, 11, 23));
+  assert.ok(Math.abs(billingFixed(entry, fromThe15th, 2) - 18) < 1e-9); // not aligned to the months: still 18
+  assert.ok(Math.abs(billingFixed(entry, current, 1) - 9) < 1e-9);
+  assert.equal(billingFixed(entry, billingPeriod(day(2025, 1, 1), 2, day(2025, 11, 23)), 2), 0); // before the history
+  assert.equal(billingFixed({ ...entry, prices: null }, current, 2), 0);
 });
 
 test("costs per kWh are added to the price of every band in euro", () => {

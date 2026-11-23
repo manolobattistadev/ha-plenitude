@@ -4,6 +4,21 @@ All notable changes to this project are listed here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [semantic versioning](https://semver.org/).
 
+## [0.4.1] - 2026-11-23
+
+### Changed
+- Periodic costs count in full, as entered. Every month carries 1/12 of their euro per year, split among its days,
+  also while it is not over; the current bill card counts all the months of the period before it ends (a TV
+  licence of 9 euro a month is 18 euro in a two-month bill, not the share of the days so far). Before, they were
+  spread over the days up to the last day with data.
+
+### Fixed
+- Prices, amounts and power accept a comma or a point for the decimals (`9,15` or `9.15`). They were number fields
+  of the browser, which refused or lost the decimal comma depending on the browser; numbers with thousands
+  separators (`1.234,56`) are now refused with a clear message instead of being guessed.
+- README: what to do when a dashboard shows *Custom element doesn't exist* (page loaded while Home Assistant was
+  starting).
+
 ## [0.4.0] - 2026-11-23
 
 ### Added
