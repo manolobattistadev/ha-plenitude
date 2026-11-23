@@ -401,3 +401,34 @@ async def test_removal_closes_the_login(hass: HomeAssistant, fake_client: FakePo
     await hass.async_block_till_done()
     assert fake_client.logouts == logouts + 1
     assert await session_store(hass, entry.entry_id).async_load() is None
+
+
+async def test_refused_days_and_months_do_not_block_the_import(
+    recorder_mock, hass: HomeAssistant, freezer, fake_client: FakePortal
+) -> None:
+    """HTTP 400 for some old days and for a month: the other days and categories are imported."""
+    freezer.move_to(datetime(2026, 11, 22, 12, tzinfo=ROME))
+    fake_client.days = days(date(2026, 9, 1), date(2026, 11, 20))
+    fake_client.refused = days(date(2026, 8, 1), date(2026, 9, 9))  # the portal refuses the oldest days
+    fake_client.refused_months = {(2026, 10)}
+
+    entry = await setup(hass, THREE_BANDS)
+
+    energy = await rows(hass, ENERGY)
+    imported = {datetime.fromtimestamp(r["start"], ROME).date() for r in energy}
+    assert min(imported) == date(2026, 9, 10) and max(imported) == date(2026, 11, 20)
+    # The walk back went on past the refused days until the run of days without data.
+    assert min(fake_client.day_requests) <= date(2026, 9, 10) - timedelta(days=31)
+    # Categories: none for the refused month, present for the others.
+    category = await rows(hass, f"{PREFIX}_cat_{next(iter(CATEGORIES.values()))}")
+    months = {datetime.fromtimestamp(r["start"], ROME).date().month for r in category}
+    assert 10 not in months and {9, 11} <= months
+    assert entry.runtime_data.last_update_success
+
+
+async def test_every_day_refused_is_an_error(hass: HomeAssistant, freezer, fake_client: FakePortal) -> None:
+    freezer.move_to(datetime(2026, 11, 22, 12, tzinfo=ROME))
+    fake_client.refused = days(date(2023, 1, 1), date(2026, 11, 21))
+    entry = await setup(hass, {PRICE_MODE: "none"})
+    assert not entry.runtime_data.last_update_success
+    assert len(fake_client.day_requests) == 31  # stopped at the run of days without data

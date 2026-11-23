@@ -14,6 +14,7 @@ from custom_components.plenitude.api import (
     Account,
     DayConsumption,
     MonthConsumption,
+    PlenitudeBadRequest,
     Reading,
     Supply,
 )
@@ -46,6 +47,8 @@ class FakePortal:
     day_requests: list[date] = field(default_factory=list)
     logins: int = 0
     logouts: int = 0
+    refused: set[date] = field(default_factory=set)
+    refused_months: set[tuple[int, int]] = field(default_factory=set)
 
     def available(self, day: date) -> bool:
         return day in self.days and day not in self.hidden
@@ -84,11 +87,15 @@ class FakeClient:
 
     async def get_day(self, account, supply, day: date) -> DayConsumption:
         self.portal.day_requests.append(day)
+        if day in self.portal.refused:
+            raise PlenitudeBadRequest("/api/profilo-energetico-services/…/analysis/consumptions: HTTP 400")
         if not self.portal.available(day):
             return DayConsumption(day=day, status="NO_DATA", hours=[], quarter_hours=[])
         return DayConsumption(day=day, status="DATA", hours=day_hours(day), quarter_hours=[])
 
     async def get_month(self, account, supply, year: int, month: int) -> MonthConsumption:
+        if (year, month) in self.portal.refused_months:
+            raise PlenitudeBadRequest("/api/profilo-energetico-services/…/analysis/consumptions: HTTP 400")
         days: dict[str, dict[date, float]] = {slug: {} for slug in CATEGORIES.values()}
         for day in self.portal.days:
             if (day.year, day.month) == (year, month) and self.portal.available(day):

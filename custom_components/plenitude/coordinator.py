@@ -45,6 +45,7 @@ from .api import (
     DayConsumption,
     MonthConsumption,
     PlenitudeAuthError,
+    PlenitudeBadRequest,
     PlenitudeClient,
     PlenitudeError,
     PlenitudeSessionExpired,
@@ -147,6 +148,9 @@ class PlenitudeCoordinator(DataUpdateCoordinator[PlenitudeData]):
         self._store = session_store(hass, entry.entry_id)
         self._state: dict[str, Any] = {}
         self._account: Account | None = None
+        # Days and months the portal refused with HTTP 400 during the current sync, and the last such error.
+        self._refused: list[str] = []
+        self._refusal: PlenitudeBadRequest | None = None
         self.supply: Supply | None = None
         self.prefix = statistic_prefix(entry.data[CONF_SUPPLY])
         # Portal names of the categories (Italian), updated with the data.
@@ -309,12 +313,36 @@ class PlenitudeCoordinator(DataUpdateCoordinator[PlenitudeData]):
         raise UpdateFailed(translation_domain=DOMAIN, translation_key="supply_missing")
 
     async def _get_day(self, day: date) -> DayConsumption:
+        """Consumption of one day. A day the portal refuses (HTTP 400) counts as a day without data: one day
+        must not block the import of all the others. The refusals are reported once per sync."""
         assert self._account and self.supply
-        return await self._call(lambda: self.client.get_day(self._account, self.supply, day))
+        try:
+            return await self._call(lambda: self.client.get_day(self._account, self.supply, day))
+        except PlenitudeBadRequest as err:
+            self._refused.append(day.isoformat())
+            self._refusal = err
+            return DayConsumption(day=day, status=None, hours=[], quarter_hours=[])
 
     async def _get_month(self, year: int, month: int) -> MonthConsumption:
+        """Categories of one month. A month the portal refuses (HTTP 400) has no categories."""
         assert self._account and self.supply
-        return await self._call(lambda: self.client.get_month(self._account, self.supply, year, month))
+        try:
+            return await self._call(lambda: self.client.get_month(self._account, self.supply, year, month))
+        except PlenitudeBadRequest as err:
+            self._refused.append(f"{year}-{month:02d}")
+            self._refusal = err
+            return MonthConsumption(year=year, month=month, status=None, days={}, names={})
+
+    def _report_refused(self) -> None:
+        if not self._refused:
+            return
+        shown = ", ".join(self._refused[:3]) + (f" … {self._refused[-1]}" if len(self._refused) > 3 else "")
+        _LOGGER.warning(
+            "Plenitude: the customer area refused %d requests (%s), treated as without data: %s",
+            len(self._refused),
+            safe_error(self._refusal) if self._refusal else "HTTP 400",
+            shown,
+        )
 
     # ----------------------------------------------------------------- recorder
 
@@ -360,6 +388,7 @@ class PlenitudeCoordinator(DataUpdateCoordinator[PlenitudeData]):
 
     async def _async_update_data(self) -> PlenitudeData:
         async with self._lock:
+            self._refused, self._refusal = [], None
             try:
                 return await self._sync()
             except (PlenitudeError, aiohttp.ClientError, TimeoutError) as err:
@@ -368,6 +397,8 @@ class PlenitudeCoordinator(DataUpdateCoordinator[PlenitudeData]):
                     translation_key="communication_error",
                     translation_placeholders={"error": safe_error(err)},
                 ) from err
+            finally:
+                self._report_refused()
 
     async def _sync(self) -> PlenitudeData:
         await self._ensure_supply()
@@ -378,6 +409,13 @@ class PlenitudeCoordinator(DataUpdateCoordinator[PlenitudeData]):
 
         if first_import:
             days = await self._fetch_history(yesterday)
+            if not days and self._refusal is not None:
+                # Every day refused: an error, not an account without data.
+                raise UpdateFailed(
+                    translation_domain=DOMAIN,
+                    translation_key="communication_error",
+                    translation_placeholders={"error": f"{safe_error(self._refusal)} ({self._refused[0]})"},
+                ) from self._refusal
             if not days:
                 _LOGGER.info("Plenitude: no consumption data available yet")
                 return PlenitudeData()

@@ -4,6 +4,17 @@ All notable changes to this project are listed here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [semantic versioning](https://semver.org/).
 
+## [0.3.6] - 2026-11-23
+
+### Fixed
+- First import: a day or a month that the customer area refuses with HTTP 400 no longer stops the whole import
+  (seen on one account: nothing was imported and the sensors stayed unavailable). A refused day counts as a day
+  without data, a refused month only loses its categories; if every day is refused it is still an error.
+
+### Added
+- One warning per sync lists the days and months refused with HTTP 400; the error of a sync where every day is
+  refused names the first one.
+
 ## [0.3.5] - 2026-11-23
 
 ### Fixed

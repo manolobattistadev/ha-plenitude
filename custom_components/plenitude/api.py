@@ -85,6 +85,10 @@ class PlenitudeAuthError(PlenitudeError):
         self.code = code
 
 
+class PlenitudeBadRequest(PlenitudeError):
+    """The portal refused one request as invalid (HTTP 400), for example a day or month it cannot answer for."""
+
+
 class PlenitudeSessionExpired(PlenitudeError):
     """The portal or Gigya session is no longer valid: open a new one."""
 
@@ -345,6 +349,8 @@ class PlenitudeClient:
                 raise PlenitudeSessionExpired(f"{safe_path(path)}: HTTP {resp.status}")
             if resp.status == 204:
                 return None
+            if resp.status == 400:
+                raise PlenitudeBadRequest(f"{safe_path(path)}: HTTP 400")
             if resp.status >= 400:
                 # Not raise_for_status(): its message would contain the full URL with the codes.
                 raise PlenitudeError(f"{safe_path(path)}: HTTP {resp.status}")
