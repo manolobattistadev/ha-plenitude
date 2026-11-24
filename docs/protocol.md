@@ -63,7 +63,7 @@ All under `https://eniplenitude.com/serviceDAp`, with the portal cookies.
 |---|---|
 | `GET /api/c360/init` | customer and account codes |
 | `GET /api/contiServices/conti/{account}/lista-forniture` | supplies (POD, address, contract) |
-| `GET /api/profilo-energetico-services/{account}/users/{customer}/supplies` | supplies with the consumption analysis (house and contract ids, `contractPower` in kW) |
+| `POST /api/profilo-energetico-services/{account}/users/{customer}/supplies` | supplies with the consumption analysis (house and contract ids, `contractPower` in kW). Body `{"pod": …, "pdr": …}`: as the web app, the POD of the electricity supply and the PDR of the first gas supply (`""` if none), asked only when a supply of the list has `flagMidori: true` |
 | `POST /api/profilo-energetico-services/{account}/analysis/consumptions` | consumption: `type` 0 = one day (24 hourly values in `data`, 96 quarter-hours in `additionalData`), 2 = one month (one value per day, per category) |
 | `GET /api/consumptionData` | monthly values by band (not used: they do not match calendar months) |
 

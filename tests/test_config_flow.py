@@ -302,3 +302,18 @@ async def test_the_throw_away_login_is_closed(hass: HomeAssistant, refused: bool
         else:
             assert len(await _electric_supplies(hass, "test@example.com", "secret")) == 1
     assert (portal.logins, portal.logouts) == (1, 1)
+
+
+async def test_no_usable_supply_is_described_without_codes(hass: HomeAssistant, caplog) -> None:
+    """Without a usable supply the log says what the account has (kind, status, analysis), not its codes."""
+    portal = FakePortal()
+    client = FakeClient(portal)
+    client.get_supplies = AsyncMock(
+        return_value=[
+            Supply(kind="GAS", pod=None, pdr="99999999999999", analysis=False, status="ATTIVO", user_type="RETAIL")
+        ]
+    )
+    with patch("custom_components.plenitude.config_flow.PlenitudeClient", return_value=client):
+        assert await _electric_supplies(hass, "test@example.com", "secret") == []
+    assert "supplies of the account: GAS (ATTIVO, RETAIL, analysis no)" in caplog.text
+    assert "99999999999999" not in caplog.text

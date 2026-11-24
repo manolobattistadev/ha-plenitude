@@ -4,6 +4,18 @@ All notable changes to this project are listed here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [semantic versioning](https://semver.org/).
 
+## [0.5.4] - 2026-11-24
+
+### Fixed
+- Configuration failing with *cannot reach the customer area: …/supplies: HTTP 400* on some accounts. The energy
+  profile of the supplies is now asked as the web app does: only when the account has the consumption analysis,
+  once for each electricity supply, with the gas supply (if any) in the same request; never for a gas supply alone,
+  as until 0.5.3. A supply refused with HTTP 400 no longer stops the others.
+
+### Changed
+- When the account has no usable supply, the log describes its supplies without their codes (kind, status,
+  household or business, consumption analysis), for bug reports.
+
 ## [0.5.3] - 2026-11-24
 
 ### Added

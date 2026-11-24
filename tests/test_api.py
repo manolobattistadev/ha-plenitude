@@ -188,3 +188,86 @@ def test_power_of_the_contract(value, power) -> None:
     from custom_components.plenitude.api import _power
 
     assert _power(value) == power
+
+
+# The energy profile (``…/users/{customer}/supplies``), asked as the web app does. Synthetic codes.
+LIGHT = {
+    "tipo": "POWER",
+    "pod": "IT001E99999999",
+    "pdr": None,
+    "flagMidori": True,
+    "status": "ATTIVO",
+    "tipoUtente": "RETAIL",
+}
+GAS = {
+    "tipo": "GAS",
+    "pod": None,
+    "pdr": "99999999999999",
+    "flagMidori": False,
+    "status": "ATTIVO",
+    "tipoUtente": "RETAIL",
+}
+
+
+def portal_with(supplies: list[dict], refused: set[str] = frozenset()) -> tuple[PlenitudeClient, list[dict]]:
+    """Client whose services answer with ``supplies``; the energy profile of a POD in ``refused`` is HTTP 400."""
+    from custom_components.plenitude.api import PlenitudeBadRequest
+
+    client = PlenitudeClient(SimpleNamespace())
+    asked: list[dict] = []
+
+    async def service(method, path, *, params=None, body=None):
+        if path.endswith("/lista-forniture"):
+            return {"fornitura": supplies}
+        asked.append(body)
+        if body["pod"] in refused:
+            raise PlenitudeBadRequest("/api/profilo-energetico-services/…/users/…/supplies: HTTP 400")
+        return {
+            "fornitureClienteMidori4FE": [
+                {"lightCode": body["pod"], "contractId": 1, "houseId": 2, "contractPower": 6, "clientType": "LIGHT"}
+            ]
+        }
+
+    client._service = service
+    return client, asked
+
+
+async def test_energy_profile_of_an_electricity_supply() -> None:
+    from custom_components.plenitude.api import Account
+
+    client, asked = portal_with([LIGHT])
+    [supply] = await client.get_supplies(Account("C", "A"))
+    assert asked == [{"pod": LIGHT["pod"], "pdr": ""}]
+    assert (supply.contract_id, supply.house_id, supply.contract_power) == ("1", "2", 6.0)
+    assert supply.summary() == "POWER (ATTIVO, RETAIL, analysis yes)"
+
+
+async def test_energy_profile_of_a_dual_account() -> None:
+    """Electricity and gas: one request with both codes, as the web app; nothing asked for the gas alone."""
+    from custom_components.plenitude.api import Account
+
+    client, asked = portal_with([LIGHT, GAS])
+    light, gas = await client.get_supplies(Account("C", "A"))
+    assert asked == [{"pod": LIGHT["pod"], "pdr": GAS["pdr"]}]
+    assert light.contract_id == "1" and gas.contract_id is None
+
+
+async def test_no_energy_profile_without_the_analysis() -> None:
+    from custom_components.plenitude.api import Account
+
+    client, asked = portal_with([{**LIGHT, "flagMidori": False}, GAS])
+    supplies = await client.get_supplies(Account("C", "A"))
+    assert asked == [] and all(s.contract_id is None for s in supplies)
+
+
+async def test_a_refused_energy_profile_does_not_stop_the_others(records: Records) -> None:
+    from custom_components.plenitude.api import Account
+
+    other = {**LIGHT, "pod": "IT001E88888888"}
+    client, asked = portal_with([LIGHT, other], refused={LIGHT["pod"]})
+    first, second = await client.get_supplies(Account("C", "A"))
+    assert len(asked) == 2 and first.contract_id is None and second.contract_id == "1"
+    assert records.messages[-1] == (
+        "Energy profile refused for the supply POWER (ATTIVO, RETAIL, analysis yes): "
+        "/api/profilo-energetico-services/…/users/…/supplies: HTTP 400"
+    )

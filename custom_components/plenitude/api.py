@@ -112,6 +112,14 @@ class Supply:
     house_id: str | None = None
     address: str | None = None
     contract_power: float | None = None  # kW, as the customer area gives it (``contractPower``)
+    analysis: bool | None = None  # ``flagMidori`` of the list of supplies: the consumption analysis is available
+    status: str | None = None  # ``status`` of the list of supplies, for example ``ATTIVO``
+    user_type: str | None = None  # ``tipoUtente``: ``RETAIL`` (households) or ``PMI`` (businesses)
+
+    def summary(self) -> str:
+        """Description of the supply without its codes, for logs and bug reports."""
+        analysis = {True: "yes", False: "no", None: "?"}[self.analysis]
+        return f"{self.kind} ({self.status or '?'}, {self.user_type or '?'}, analysis {analysis})"
 
 
 @dataclass
@@ -534,7 +542,14 @@ class PlenitudeClient:
         return Account(client_code=str(data["codiceCliente"]), account_code=str(data["codiceContoDefault"]))
 
     async def get_supplies(self, account: Account) -> list[Supply]:
-        """Supplies of the account, with the ``contractId``/``houseId`` needed by the consumption API."""
+        """Supplies of the account, with the ``contractId``/``houseId`` needed by the consumption API.
+
+        The energy profile is asked as the web app does (``b-angular-prod`` bundle, read in the capture of
+        2026-11-22): only when a supply has the consumption analysis (``flagMidori``), with the POD of the
+        electricity supply and the PDR of the first gas supply in the same request (``""`` when there is none).
+        Until 0.5.3 the integration also asked it for each gas supply, with an empty POD, which the web app never
+        does. A supply refused with HTTP 400 stays without analysis: the others are still read.
+        """
         data = await self._service("GET", f"/api/contiServices/conti/{account.account_code}/lista-forniture")
         supplies = [
             Supply(
@@ -542,19 +557,29 @@ class PlenitudeClient:
                 pod=item.get("pod") or None,
                 pdr=item.get("pdr") or None,
                 address=item.get("indirizzoFornitura") or None,
+                analysis=item.get("flagMidori") if isinstance(item.get("flagMidori"), bool) else None,
+                status=item.get("status") or None,
+                user_type=item.get("tipoUtente") or None,
             )
             for item in (data or {}).get("fornitura", [])
         ]
+        if all(supply.analysis is False for supply in supplies):
+            return supplies
+        pdr = next((s.pdr for s in supplies if s.pdr and (s.kind == "GAS" or not s.pod)), "")
         for supply in supplies:
-            profile = await self._service(
-                "POST",
-                f"/api/profilo-energetico-services/{account.account_code}/users/{account.client_code}/supplies",
-                body={"pod": supply.pod or "", "pdr": supply.pdr or ""},
-            )
+            if not supply.pod:
+                continue  # gas: the integration reads only electricity
+            try:
+                profile = await self._service(
+                    "POST",
+                    f"/api/profilo-energetico-services/{account.account_code}/users/{account.client_code}/supplies",
+                    body={"pod": supply.pod, "pdr": pdr},
+                )
+            except PlenitudeBadRequest as err:
+                _LOGGER.warning("Energy profile refused for the supply %s: %s", supply.summary(), safe_error(err))
+                continue
             for item in (profile or {}).get("fornitureClienteMidori4FE", []):
-                if supply.pod and item.get("lightCode") != supply.pod:
-                    continue
-                if supply.pdr and not supply.pod and item.get("gasCode") != supply.pdr:
+                if item.get("lightCode") != supply.pod:
                     continue
                 supply.contract_id = str(item["contractId"])
                 supply.house_id = str(item["houseId"])

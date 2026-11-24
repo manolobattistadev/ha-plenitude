@@ -112,7 +112,15 @@ async def _electric_supplies(hass: HomeAssistant, email: str, password: str) -> 
             await client.logout(account)
     finally:
         session.detach()  # the connector is shared with Home Assistant: detach, do not close
-    return [s for s in supplies if s.pod and s.contract_id and s.house_id]
+    usable = [s for s in supplies if s.pod and s.contract_id and s.house_id]
+    if not usable:
+        # What the account has, without its codes: enough for a bug report.
+        _LOGGER.warning(
+            "Plenitude %s: no electricity supply with the consumption analysis; supplies of the account: %s",
+            INTEGRATION_VERSION,
+            ", ".join(s.summary() for s in supplies) or "none",
+        )
+    return usable
 
 
 def _label(supply: Supply) -> str:
