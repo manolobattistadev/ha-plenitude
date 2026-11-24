@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -304,7 +305,7 @@ async def test_the_throw_away_login_is_closed(hass: HomeAssistant, refused: bool
     assert (portal.logins, portal.logouts) == (1, 1)
 
 
-async def test_no_usable_supply_is_described_without_codes(hass: HomeAssistant, caplog) -> None:
+async def test_no_usable_supply_is_described_without_codes(hass: HomeAssistant) -> None:
     """Without a usable supply the log says what the account has (kind, status, analysis), not its codes."""
     portal = FakePortal()
     client = FakeClient(portal)
@@ -313,7 +314,16 @@ async def test_no_usable_supply_is_described_without_codes(hass: HomeAssistant, 
             Supply(kind="GAS", pod=None, pdr="99999999999999", analysis=False, status="ATTIVO", user_type="RETAIL")
         ]
     )
-    with patch("custom_components.plenitude.config_flow.PlenitudeClient", return_value=client):
-        assert await _electric_supplies(hass, "test@example.com", "secret") == []
-    assert "supplies of the account: GAS (ATTIVO, RETAIL, analysis no)" in caplog.text
-    assert "99999999999999" not in caplog.text
+    # A handler of its own, not caplog: the CI runs pytest with -p no:logging.
+    messages: list[str] = []
+    handler = logging.Handler()
+    handler.emit = lambda record: messages.append(record.getMessage())
+    logger = logging.getLogger("custom_components.plenitude.config_flow")
+    logger.addHandler(handler)
+    try:
+        with patch("custom_components.plenitude.config_flow.PlenitudeClient", return_value=client):
+            assert await _electric_supplies(hass, "test@example.com", "secret") == []
+    finally:
+        logger.removeHandler(handler)
+    assert any("supplies of the account: GAS (ATTIVO, RETAIL, analysis no)" in m for m in messages)
+    assert not any("99999999999999" in m for m in messages)
