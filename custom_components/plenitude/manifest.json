@@ -20,5 +20,5 @@
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/paoloaq/ha-plenitude/issues",
   "requirements": [],
-  "version": "0.5.2"
+  "version": "0.5.3"
 }
