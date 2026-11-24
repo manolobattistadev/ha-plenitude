@@ -14,7 +14,7 @@ const COSTS = [
   { name: "Accise", kind: "per_kwh", amount: 0.0227, exempt: true, yearly: null },
   { name: "Quota fissa", kind: "monthly", amount: 6.92, exempt: false, yearly: 83.04 },
   { name: "Canone TV", kind: "bimonthly", amount: 18, exempt: true, yearly: 108 },
-  { name: "Quota potenza 6 kW", kind: "per_kw_monthly", amount: 1.9767, power: 6, exempt: false, yearly: 142.3224 },
+  { name: "Quota potenza", kind: "per_kw_monthly", amount: 1.9767, power: 6, exempt: false, yearly: 142.3224 },
   { name: "IVA", kind: "percent", amount: 10, yearly: null },
 ];
 const VAT = 1.1; // the percentage, on the energy and on the costs that are not excluded from it
