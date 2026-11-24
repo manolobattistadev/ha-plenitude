@@ -1,6 +1,6 @@
 # Eni Plenitude for Home Assistant
 
-[![HACS custom repository](https://img.shields.io/badge/HACS-custom%20repository-41BDF5)](https://hacs.xyz/docs/faq/custom_repositories/)
+[![Marketplace and HACS: custom repository](https://img.shields.io/badge/Marketplace%20%7C%20HACS-custom%20repository-41BDF5)](#installation)
 [![Home Assistant 2026.9+](https://img.shields.io/badge/Home%20Assistant-2026.9%2B-18BCF2)](https://www.home-assistant.io/)
 [![Tests](https://github.com/paoloaq/ha-plenitude/actions/workflows/tests.yml/badge.svg)](https://github.com/paoloaq/ha-plenitude/actions/workflows/tests.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
@@ -54,7 +54,22 @@ It is an integration, not an add-on: it works with every installation type (Home
 
 ## Installation
 
-### With HACS (recommended)
+It depends on your version of Home Assistant: from **2026.11** HACS is part of Home Assistant as the
+**Marketplace**; up to 2026.10 it is the HACS custom integration.
+
+### With the Marketplace (Home Assistant 2026.11 and later, recommended)
+1. Open **Settings → Marketplace**, tab **Add from link**. Or open [this link](https://my.home-assistant.io/redirect/marketplace_repository/?owner=paoloaq&repository=ha-plenitude&category=integration): it asks to add the repository
+   to the Marketplace of your Home Assistant.
+2. As **GitHub link** enter `https://github.com/paoloaq/ha-plenitude`, as **Type** choose **Integration**, then
+   select **Add**. The first time the Marketplace asks you to **Connect GitHub**: you get a code to enter on GitHub,
+   and the connection only reads public information.
+3. Search for **Eni Plenitude**, open it and select **Install**.
+4. Restart Home Assistant.
+
+Installed with HACS before updating Home Assistant to 2026.11? There is nothing to do: at the first start the
+Marketplace takes over HACS and the repositories added to it, Eni Plenitude included.
+
+### With HACS (Home Assistant 2026.10 and earlier)
 1. In Home Assistant open **HACS**, then the menu **⋮ → Custom repositories**.
 2. Add `https://github.com/paoloaq/ha-plenitude` with type **Integration**.
 3. Search for **Eni Plenitude**, open it and select **Download**.
@@ -313,7 +328,8 @@ To report a vulnerability, see [SECURITY.md](SECURITY.md).
 1. **Settings → Devices & services → Eni Plenitude → ⋮ → Delete.**
 2. The imported statistics stay in the database. To delete them, go to **Developer tools → Statistics**, search
    for `plenitude` and delete them.
-3. With HACS, remove the integration from HACS too, then restart Home Assistant.
+3. In the Marketplace (or in HACS up to Home Assistant 2026.10) open **Eni Plenitude** and select **Uninstall**,
+   then restart Home Assistant.
 
 ## Limitations
 - Home Assistant statistics are hourly: the 15-minute values are summed by hour.

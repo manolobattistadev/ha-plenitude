@@ -12,6 +12,9 @@ All notable changes to this project are listed here. The format follows
   costs of a real contract.
 
 ### Changed
+- Installation: with the **Marketplace** from Home Assistant 2026.11 (HACS is now part of Home Assistant), with HACS
+  up to 2026.10; a link that adds the repository to the Marketplace. Installs made with HACS are taken over by the
+  Marketplace, nothing to do.
 - `tests/frontend/harness.html` and `dashboard.html` share their fake `hass` (`tests/frontend/fake-hass.js`): single
   price, costs per kWh excluded from the percentages, two-monthly costs, power of 6 kW.
 

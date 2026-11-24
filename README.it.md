@@ -1,6 +1,6 @@
 # Eni Plenitude per Home Assistant
 
-[![HACS repository personalizzato](https://img.shields.io/badge/HACS-custom%20repository-41BDF5)](https://hacs.xyz/docs/faq/custom_repositories/)
+[![Marketplace e HACS: repository personalizzato](https://img.shields.io/badge/Marketplace%20%7C%20HACS-custom%20repository-41BDF5)](#installazione)
 [![Home Assistant 2026.9+](https://img.shields.io/badge/Home%20Assistant-2026.9%2B-18BCF2)](https://www.home-assistant.io/)
 [![Test](https://github.com/paoloaq/ha-plenitude/actions/workflows/tests.yml/badge.svg)](https://github.com/paoloaq/ha-plenitude/actions/workflows/tests.yml)
 [![Licenza: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
@@ -54,7 +54,22 @@ Un'integrazione di Home Assistant che porta in Home Assistant i consumi di luce 
 
 ## Installazione
 
-### Con HACS (consigliata)
+Dipende dalla versione di Home Assistant: dalla **2026.11** HACS fa parte di Home Assistant come **Marketplace**;
+fino alla 2026.10 è l'integrazione personalizzata HACS.
+
+### Con il Marketplace (Home Assistant 2026.11 e successive, consigliata)
+1. Apri **Impostazioni → Marketplace**, scheda **Aggiungi dal collegamento**. Oppure apri [questo link](https://my.home-assistant.io/redirect/marketplace_repository/?owner=paoloaq&repository=ha-plenitude&category=integration):
+   chiede di aggiungere il repository al Marketplace del tuo Home Assistant.
+2. In **Collegamento GitHub** inserisci `https://github.com/paoloaq/ha-plenitude`, come **Tipo** scegli
+   **Integrazione**, poi seleziona **Aggiungi**. La prima volta il Marketplace chiede di collegare GitHub
+   (**Collega GitHub**): ricevi un codice da inserire su GitHub, e il collegamento legge solo informazioni pubbliche.
+3. Cerca **Eni Plenitude**, aprila e scegli **Installa**.
+4. Riavvia Home Assistant.
+
+L'avevi installata con HACS prima di aggiornare Home Assistant alla 2026.11? Non devi fare niente: al primo avvio il
+Marketplace prende in carico HACS e i repository aggiunti, Eni Plenitude compresa.
+
+### Con HACS (Home Assistant 2026.10 e precedenti)
 1. In Home Assistant apri **HACS**, poi il menu **⋮ → Repository personalizzati**.
 2. Aggiungi `https://github.com/paoloaq/ha-plenitude` con tipo **Integrazione**.
 3. Cerca **Eni Plenitude**, aprila e scegli **Scarica**.
@@ -314,7 +329,8 @@ Per segnalare una vulnerabilità vedi [SECURITY.md](SECURITY.md).
 1. **Impostazioni → Dispositivi e servizi → Eni Plenitude → ⋮ → Elimina.**
 2. Le statistiche importate restano nel database. Per eliminarle vai in **Strumenti per sviluppatori →
    Statistiche**, cerca `plenitude` ed eliminale.
-3. Con HACS, rimuovi l'integrazione anche da HACS, poi riavvia Home Assistant.
+3. Nel Marketplace (o in HACS fino a Home Assistant 2026.10) apri **Eni Plenitude** e scegli **Disinstalla**, poi
+   riavvia Home Assistant.
 
 ## Limiti
 - Le statistiche di Home Assistant sono orarie: i valori ogni 15 minuti si sommano per ora.
