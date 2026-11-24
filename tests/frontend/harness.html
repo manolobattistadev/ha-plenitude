@@ -34,6 +34,8 @@
       this.style.boxShadow = "0 0 0 1px var(--divider-color)";
     }
   });
+  // Stand-in for the frontend's root element: the cards are defined once it exists.
+  customElements.define("home-assistant", class extends HTMLElement {});
 </script>
 <script src="../../custom_components/plenitude/frontend/plenitude-cards.js"></script>
 </head>

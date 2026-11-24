@@ -286,6 +286,9 @@ To report a vulnerability, see [SECURITY.md](SECURITY.md).
   Home Assistant has started (without the cache, or clear the cache of the companion app). If they are still
   missing, open `/plenitude_static/plenitude-cards.js` on your Home Assistant: it must show the code of the cards
   with the version at the top. Do not add the cards as dashboard resources: the integration loads them.
+  Versions before 0.5.2 could also miss the cards at random with Home Assistant 2026.10 and older, also hours
+  after a restart (the frontend replaced its registry of elements after the cards were defined): update the
+  integration. In the browser's console, `customElements.get("plenitude-billing-card")` must not be `undefined`.
 - **The cost differs from the bill.** See [Prices and costs](#prices-and-costs): enter every line of the bill as a
   cost, without VAT, and VAT as a percentage. Bills may also contain adjustments and estimated readings.
 

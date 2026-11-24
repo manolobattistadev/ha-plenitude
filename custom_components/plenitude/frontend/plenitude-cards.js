@@ -26,7 +26,7 @@
  * and hand-drawn SVG. Text that comes from outside (category names) is always set with textContent.
  */
 
-const CARD_VERSION = "0.5.1";
+const CARD_VERSION = "0.5.2";
 
 // ------------------------------------------------------------------------------------------- language
 
@@ -1401,11 +1401,29 @@ class PlenitudeBillingCard extends PlenitudeBase {
   }
 }
 
-if (!customElements.get("plenitude-consumption-card")) {
-  customElements.define("plenitude-consumption-card", PlenitudeConsumptionCard);
+// The cards are defined in the registry that the frontend uses. Up to Home Assistant 2026.10 the page starts this
+// file and the frontend at the same time, and the first thing the frontend loads is a polyfill (scoped custom
+// element registry) that replaces window.customElements with a new, empty registry. A card defined before the
+// swap stays in the old one, where the frontend no longer looks: "Custom element doesn't exist" until the page is
+// reloaded, with nothing in the console (fixed in Home Assistant 2026.11, home-assistant/frontend#54444). So the
+// cards wait for the polyfill, or, without it, for the frontend's root element, which it defines after the polyfill.
+// `customElements` is read when the cards are defined, not when this file starts: after the swap it is the new one.
+function defineCards() {
+  for (const [type, cardClass] of [
+    ["plenitude-consumption-card", PlenitudeConsumptionCard],
+    ["plenitude-billing-card", PlenitudeBillingCard],
+  ]) {
+    if (!customElements.get(type)) {
+      customElements.define(type, cardClass);
+    }
+  }
 }
-if (!customElements.get("plenitude-billing-card")) {
-  customElements.define("plenitude-billing-card", PlenitudeBillingCard);
+
+if (window.CustomElementRegistryPolyfill || customElements.get("home-assistant")) {
+  defineCards();
+} else {
+  // Before the swap this is the old registry: the polyfill registers a stand-in for the root element there too.
+  customElements.whenDefined("home-assistant").then(defineCards);
 }
 
 // Names and descriptions for the card picker. Getters: this file is loaded before the frontend knows the language

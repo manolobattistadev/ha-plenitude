@@ -285,6 +285,10 @@ Per segnalare una vulnerabilità vedi [SECURITY.md](SECURITY.md).
   pagina ad avvio finito (senza cache, o svuota la cache dell'app). Se mancano ancora, apri
   `/plenitude_static/plenitude-cards.js` sul tuo Home Assistant: deve mostrare il codice delle card con la versione
   in cima. Non aggiungere le card alle risorse della dashboard: le carica l'integrazione.
+  Le versioni precedenti alla 0.5.2 potevano perdere le card a caso con Home Assistant 2026.10 e precedenti, anche
+  ore dopo un riavvio (il frontend sostituiva il suo registro degli elementi dopo che le card erano state definite):
+  aggiorna l'integrazione. Nella console del browser `customElements.get("plenitude-billing-card")` non deve
+  restituire `undefined`.
 - **Il costo è diverso dalla bolletta.** Vedi [Prezzi e costi](#prezzi-e-costi): inserisci ogni voce della
   bolletta come costo, senza IVA, e l'IVA come percentuale. Le bollette possono contenere anche conguagli e letture
   stimate.

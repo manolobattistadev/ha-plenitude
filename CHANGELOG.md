@@ -4,6 +4,18 @@ All notable changes to this project are listed here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [semantic versioning](https://semver.org/).
 
+## [0.5.2] - 2026-11-24
+
+### Fixed
+- Cards missing at random, in the browser and in the companion app, with Home Assistant 2026.10 and older: a
+  dashboard showed *Custom element doesn't exist* and the card editor *Custom element not found:
+  plenitude-billing-card*, until the page was reloaded, with nothing in the console. The page starts the cards and
+  the frontend at the same time, and the first thing the frontend loads is a polyfill that replaces
+  `window.customElements` with a new registry: cards defined before it stayed in the old one. The cards now wait
+  for the polyfill (or, without it, for the frontend's root element). Home Assistant 2026.11 fixed the order on
+  its side (home-assistant/frontend#54444). Reproduced in Home Assistant 2026.9.4 with its frontend, loading slowed
+  down: cards missing in 15 page loads out of 15 with 0.5.1, in none out of 15 with 0.5.2.
+
 ## [0.5.1] - 2026-11-23
 
 ### Fixed

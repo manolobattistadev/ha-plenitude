@@ -8,7 +8,7 @@ import vm from "node:vm";
 const source = readFileSync(new URL("../../custom_components/plenitude/frontend/plenitude-cards.js", import.meta.url), "utf8");
 const sandbox = {
   HTMLElement: class {},
-  customElements: { get: () => undefined, define: () => {} },
+  customElements: { get: () => undefined, define: () => {}, whenDefined: () => new Promise(() => {}) },
   window: {},
   document: { documentElement: { lang: "it" } },
   navigator: { language: "it-IT" },
@@ -234,7 +234,7 @@ function freshCards({ storage = new Map(), lang = "it", selected = null } = {}) 
   };
   const box = {
     HTMLElement: class {},
-    customElements: { get: () => undefined, define: () => {} },
+    customElements: { get: () => undefined, define: () => {}, whenDefined: () => new Promise(() => {}) },
     window: { localStorage },
     document: { documentElement: { lang }, querySelector: () => null },
     navigator: { language: "en-US" },
@@ -320,4 +320,81 @@ test("card picker: names in the language of the profile, read when the picker op
   box.document.documentElement.lang = "it"; // set by the frontend once its translations are loaded
   assert.equal(card.name, "Plenitude: consumi");
   assert.equal(freshCards({ lang: "", selected: "it" }).box.window.customCards[0].name, "Plenitude: consumi");
+});
+
+// A registry with what the cards file uses; `onDefine` mimics the polyfill, which also defines a stand-in for every
+// element in the native registry.
+class FakeRegistry {
+  constructor(onDefine = () => {}) {
+    this.classes = new Map();
+    this.waiting = new Map();
+    this.onDefine = onDefine;
+  }
+  get(type) {
+    return this.classes.get(type);
+  }
+  define(type, cls) {
+    if (this.classes.has(type)) throw new Error(`${type} already defined`);
+    this.classes.set(type, cls);
+    this.onDefine(type);
+    this.waiting.get(type)?.forEach((resolve) => resolve(cls));
+  }
+  whenDefined(type) {
+    if (this.classes.has(type)) return Promise.resolve(this.classes.get(type));
+    return new Promise((resolve) => this.waiting.set(type, [...(this.waiting.get(type) || []), resolve]));
+  }
+}
+
+function cardsIn(registry, window = {}) {
+  const box = {
+    HTMLElement: class {},
+    customElements: registry,
+    window: { customCards: [], ...window },
+    document: { documentElement: { lang: "it" }, querySelector: () => null },
+    navigator: { language: "it-IT" },
+    console: { info: () => {} },
+    Intl,
+    Date,
+    Math,
+    JSON,
+    Promise,
+  };
+  vm.createContext(box);
+  vm.runInContext(source, box);
+  return box;
+}
+
+const CARD_TYPES = ["plenitude-consumption-card", "plenitude-billing-card"];
+
+test("cards started before the frontend's polyfill are defined in the registry that replaces the native one", async () => {
+  const native = new FakeRegistry();
+  const box = cardsIn(native); // Home Assistant 2026.10 and older: this file can run first
+  await Promise.resolve();
+  assert.deepEqual(CARD_TYPES.map((t) => native.get(t)), [undefined, undefined]); // nothing in the old registry
+  const scoped = new FakeRegistry((type) => native.get(type) || native.define(type, class {}));
+  box.window.CustomElementRegistryPolyfill = {}; // the polyfill swaps window.customElements
+  box.customElements = scoped;
+  scoped.define("home-assistant", class {}); // then the frontend defines its root element
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.ok(CARD_TYPES.every((t) => scoped.get(t)));
+  assert.ok(CARD_TYPES.every((t) => native.get(t) !== scoped.get(t))); // only the polyfill's stand-ins there
+});
+
+test("cards started after the polyfill, or with the frontend already up, are defined at once", () => {
+  const scoped = new FakeRegistry();
+  cardsIn(scoped, { CustomElementRegistryPolyfill: {} }); // Home Assistant 2026.11: the polyfill comes first
+  assert.ok(CARD_TYPES.every((t) => scoped.get(t)));
+  const native = new FakeRegistry();
+  native.define("home-assistant", class {}); // a frontend without the polyfill, already started
+  cardsIn(native);
+  assert.ok(CARD_TYPES.every((t) => native.get(t)));
+});
+
+test("without the polyfill the cards wait for the frontend's root element", async () => {
+  const native = new FakeRegistry();
+  cardsIn(native);
+  assert.equal(native.get("plenitude-billing-card"), undefined);
+  native.define("home-assistant", class {});
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.ok(CARD_TYPES.every((t) => native.get(t)));
 });
