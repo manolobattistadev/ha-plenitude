@@ -67,6 +67,12 @@ google-chrome --headless=new --screenshot=/tmp/cards.png --window-size=1180,3500
   --virtual-time-budget=4000 "file://$PWD/tests/frontend/harness.html"
 ```
 
+`tests/frontend/dashboard.html` draws the example dashboard (`examples/dashboard.yaml`) like a sections view of Home
+Assistant, with the same fake `hass` as `harness.html` (`fake-hass.js`: synthetic consumption, the prices and costs
+of a real contract) and the date fixed at 24 November 2026. The screenshots in `docs/images` come from it
+(`?theme=dark`, `?lang=en`; the command is at the top of the file). Screenshots of a real installation never go in
+the repository: they show someone's consumption.
+
 ### Live check (maintainers)
 `tests/live` runs the integration against the real customer area in a test Home Assistant with the real recorder.
 It prints only counts and differences, never values or codes. It is skipped unless `PLENITUDE_LIVE=1`, and reads

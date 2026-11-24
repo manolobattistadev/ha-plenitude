@@ -19,6 +19,11 @@ A Home Assistant integration that brings the electricity consumption of your
 - two **dashboard cards**: a consumption chart with a period of your choice, and the **current bill** (kWh and
   euro of the billing period so far, with an estimate at the end of the period).
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/paoloaq/ha-plenitude/main/docs/images/dashboard-dark-en.png">
+  <img alt="The example dashboard: current bill and consumption of the week in euro, by band (synthetic consumption)" src="https://raw.githubusercontent.com/paoloaq/ha-plenitude/main/docs/images/dashboard-light-en.png">
+</picture>
+
 It is an integration, not an add-on: it works with every installation type (Home Assistant OS, Container, Core).
 
 > [!IMPORTANT]
@@ -165,6 +170,18 @@ The integration ships two cards and loads them on every dashboard by itself. You
 to add them as resources. In a dashboard select **Edit → Add card**, search for **Plenitude** and configure them
 in the visual editor. The cards follow the language of your user profile (Italian or English) and the light or
 dark theme.
+
+### Example dashboard
+[`examples/dashboard.yaml`](examples/dashboard.yaml) is a dashboard with both cards: the current bill of the
+two-month period and the consumption of the week in euro, by band. In **Settings → Dashboards → Add dashboard**
+choose **New dashboard from scratch**; open it, select **Edit dashboard** (the pencil), then **⋮ → Raw
+configuration editor**, paste it and set `start_date` to the first day of one of your billing periods. The
+screenshots show it with synthetic consumption and the prices and costs of a real contract (single price, 6 kW), in
+the light and in the dark theme.
+
+| Light | Dark |
+|---|---|
+| ![Example dashboard, light theme](https://raw.githubusercontent.com/paoloaq/ha-plenitude/main/docs/images/dashboard-light-en.png) | ![Example dashboard, dark theme](https://raw.githubusercontent.com/paoloaq/ha-plenitude/main/docs/images/dashboard-dark-en.png) |
 
 The statistics change once a day, when new days are imported. The cards keep what they read until then: in
 memory for all the cards of the page, and in the browser's storage across reloads of the page (a few kB per

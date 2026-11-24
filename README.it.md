@@ -19,6 +19,11 @@ Un'integrazione di Home Assistant che porta in Home Assistant i consumi di luce 
 - due **card** per le dashboard: il grafico dei consumi con il periodo che preferisci e la **bolletta in corso**
   (kWh ed euro del periodo di fatturazione finora, con una stima a fine periodo).
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/paoloaq/ha-plenitude/main/docs/images/dashboard-dark-it.png">
+  <img alt="La plancia d'esempio: bolletta in corso e consumi della settimana in euro, per fascia (consumi sintetici)" src="https://raw.githubusercontent.com/paoloaq/ha-plenitude/main/docs/images/dashboard-light-it.png">
+</picture>
+
 È un'integrazione, non un add-on: funziona con ogni tipo di installazione (Home Assistant OS, Container, Core).
 
 > [!IMPORTANT]
@@ -163,6 +168,18 @@ Plenitude non li pubblica.
 L'integrazione porta con sé due card e le carica da sola in ogni dashboard: non vanno installate né aggiunte alle
 risorse. In una dashboard scegli **Modifica → Aggiungi card**, cerca **Plenitude** e configurale dall'editor
 visuale. Le card seguono la lingua del tuo profilo utente (italiano o inglese) e il tema chiaro o scuro.
+
+### Plancia d'esempio
+[`examples/dashboard.yaml`](examples/dashboard.yaml) è una plancia con entrambe le card: la bolletta in corso del
+bimestre e i consumi della settimana in euro, per fascia. In **Impostazioni → Plance → Aggiungi plancia** scegli
+**Nuova plancia da zero**; aprila, scegli **Modifica la plancia** (la matita), poi **⋮ → Editor di configurazione
+testuale**, incollala e metti in `start_date` il primo giorno di un tuo periodo di fatturazione. Gli screenshot la
+mostrano con consumi sintetici e con i prezzi e i costi di un contratto vero (prezzo unico, 6 kW), nel tema chiaro e
+in quello scuro.
+
+| Chiaro | Scuro |
+|---|---|
+| ![Plancia d'esempio, tema chiaro](https://raw.githubusercontent.com/paoloaq/ha-plenitude/main/docs/images/dashboard-light-it.png) | ![Plancia d'esempio, tema scuro](https://raw.githubusercontent.com/paoloaq/ha-plenitude/main/docs/images/dashboard-dark-it.png) |
 
 Le statistiche cambiano una volta al giorno, quando arrivano i giorni nuovi. Fino ad allora le card tengono quello
 che hanno letto: in memoria per tutte le card della pagina e nella memoria del browser quando la pagina si ricarica

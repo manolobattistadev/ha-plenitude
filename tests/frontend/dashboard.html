@@ -1,0 +1,110 @@
+<!doctype html>
+<!--
+  The example dashboard (examples/dashboard.yaml) drawn like a sections view of Home Assistant, with the fake `hass`
+  of fake-hass.js: synthetic consumption, the prices and costs of a real contract, the date fixed at 24 November
+  2026. The screenshots in docs/images come from here (?theme=dark for the dark theme, ?lang=en for English):
+
+  for t in light dark; do for l in it en; do
+    TZ=Europe/Rome "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless=new \
+      --force-device-scale-factor=2 --hide-scrollbars --window-size=1100,880 --virtual-time-budget=8000 \
+      --screenshot="docs/images/dashboard-$t-$l.png" "file://$PWD/tests/frontend/dashboard.html?theme=$t&lang=$l"
+  done; done
+-->
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Plenitude example dashboard</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500&display=swap">
+<style>
+  :root {
+    --primary-color: #009ac7; --text-primary-color: #fff;
+    --primary-text-color: #141414; --secondary-text-color: #5e5e5e; --divider-color: rgba(0, 0, 0, .12);
+    --card-background-color: #ffffff; --primary-background-color: #fafafa;
+  }
+  :root.dark {
+    --primary-text-color: #e1e1e1; --secondary-text-color: #9b9b9b; --divider-color: rgba(225, 225, 225, .12);
+    --card-background-color: #1c1c1c; --primary-background-color: #111111;
+  }
+  body {
+    margin: 0; background: var(--primary-background-color); color: var(--primary-text-color);
+    font-family: Roboto, Noto, system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  header {
+    height: 56px; display: flex; align-items: center; padding: 0 16px; font-size: 20px;
+    background: var(--card-background-color); border-bottom: 1px solid var(--divider-color);
+  }
+  /* As hui-sections-view: columns of at most 500px, 32px apart, centred. */
+  main {
+    display: grid; grid-template-columns: repeat(var(--columns), minmax(320px, 500px)); gap: 24px 32px;
+    justify-content: center; align-items: start; padding: 24px 32px;
+  }
+  .section { display: grid; gap: 8px; }
+</style>
+<script>
+  // The date of the screenshots: 24 November 2026, midday.
+  (() => {
+    const FIXED = new Date(2026, 10, 24, 12).getTime();
+    const RealDate = Date;
+    class FixedDate extends RealDate {
+      constructor(...args) {
+        super(...(args.length ? args : [FIXED]));
+      }
+      static now() {
+        return FIXED;
+      }
+    }
+    window.Date = FixedDate;
+  })();
+  const params = new URLSearchParams(location.search);
+  const DARK = params.get("theme") === "dark";
+  const LANG = params.get("lang") === "en" ? "en" : "it";
+  document.documentElement.lang = LANG;
+  if (DARK) document.documentElement.classList.add("dark");
+  // Stand-ins for Home Assistant's ha-card and for the frontend's root element (the cards wait for it).
+  customElements.define("ha-card", class extends HTMLElement {
+    connectedCallback() {
+      this.style.display = "block";
+      this.style.background = "var(--card-background-color)";
+      this.style.borderRadius = "12px";
+      this.style.border = "1px solid var(--divider-color)";
+    }
+  });
+  customElements.define("home-assistant", class extends HTMLElement {});
+</script>
+<script src="../../custom_components/plenitude/frontend/plenitude-cards.js"></script>
+<script src="fake-hass.js"></script>
+<!-- The view of examples/dashboard.yaml: its title and the cards of each section (tests/test_repository.py checks it). -->
+<script type="application/json" id="dashboard">
+{
+  "title": "ENI Plenitude",
+  "sections": [
+    [{"type": "custom:plenitude-billing-card", "title": "Bolletta", "start_date": "2026-11-01", "months": 2}],
+    [{"type": "custom:plenitude-consumption-card", "title": "Storico", "period": "week", "view": "bands", "unit": "eur"}]
+  ]
+}
+</script>
+</head>
+<body>
+<header id="title"></header>
+<main id="view"></main>
+<script>
+  const view = JSON.parse(document.getElementById("dashboard").textContent);
+  document.getElementById("title").textContent = view.title;
+  const main = document.getElementById("view");
+  main.style.setProperty("--columns", view.sections.length);
+  const hass = makeHass(DARK, LANG);
+  for (const cards of view.sections) {
+    const section = document.createElement("div");
+    section.className = "section";
+    for (const config of cards) {
+      const card = document.createElement(config.type.replace(/^custom:/, ""));
+      card.setConfig(config);
+      section.append(card);
+      card.hass = hass;
+    }
+    main.append(section);
+  }
+</script>
+</body>
+</html>

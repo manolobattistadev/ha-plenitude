@@ -6,6 +6,8 @@ import json
 import re
 from pathlib import Path
 
+import yaml
+
 ROOT = Path(__file__).parent.parent
 INTEGRATION = ROOT / "custom_components" / "plenitude"
 
@@ -74,3 +76,20 @@ def test_hacs_minimum_version_matches_the_readme() -> None:
     major_minor = ".".join(minimum.split(".")[:2])
     for readme in ("README.md", "README.it.md"):
         assert major_minor in (ROOT / readme).read_text(encoding="utf-8"), readme
+
+
+def test_screenshot_page_shows_the_example_dashboard() -> None:
+    """docs/images come from tests/frontend/dashboard.html: it must draw examples/dashboard.yaml."""
+    view = yaml.safe_load((ROOT / "examples" / "dashboard.yaml").read_text(encoding="utf-8"))["views"][0]
+    page = (ROOT / "tests" / "frontend" / "dashboard.html").read_text(encoding="utf-8")
+    shown = json.loads(re.search(r'<script type="application/json" id="dashboard">(.*?)</script>', page, re.S)[1])
+    assert shown == {"title": view["title"], "sections": [section["cards"] for section in view["sections"]]}
+
+
+def test_readmes_show_the_screenshots() -> None:
+    for readme, lang in (("README.md", "en"), ("README.it.md", "it")):
+        text = (ROOT / readme).read_text(encoding="utf-8")
+        assert "examples/dashboard.yaml" in text, readme
+        for theme in ("light", "dark"):
+            name = f"dashboard-{theme}-{lang}.png"
+            assert name in text and (ROOT / "docs" / "images" / name).is_file(), name

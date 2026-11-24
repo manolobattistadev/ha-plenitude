@@ -1,0 +1,21 @@
+title: Energia
+views:
+  - title: ENI Plenitude
+    path: eni-plenitude
+    icon: mdi:lightning-bolt
+    type: sections
+    max_columns: 2
+    sections:
+      - type: grid
+        cards:
+          - type: custom:plenitude-billing-card
+            title: Bolletta
+            start_date: '2026-11-01'
+            months: 2
+      - type: grid
+        cards:
+          - type: custom:plenitude-consumption-card
+            title: Storico
+            period: week
+            view: bands
+            unit: eur

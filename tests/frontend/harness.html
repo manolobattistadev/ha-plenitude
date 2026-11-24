@@ -38,6 +38,7 @@
   customElements.define("home-assistant", class extends HTMLElement {});
 </script>
 <script src="../../custom_components/plenitude/frontend/plenitude-cards.js"></script>
+<script src="fake-hass.js"></script>
 </head>
 <body>
 <pre id="report">pending</pre>
@@ -45,98 +46,6 @@
 <section class="theme dark" id="dark"><h1>Tema scuro</h1></section>
 <section class="theme light" id="english"><h1>English (user profile language)</h1></section>
 <script>
-  // ----- synthetic data: deterministic hourly profile, bands as in the ARERA table (no holidays here)
-  const FIRST = new Date(2026, 0, 4).getTime();
-  const LAST_DAY = "2026-11-20";
-  const LAST = new Date(2026, 10, 21).getTime();
-  const PRICES = { f1: 0.31, f2: 0.27, f3: 0.22 };
-  // As plenitude/info sends them: ``yearly`` is euro per year (null for the costs per kWh and the percentages).
-  const COSTS = [
-    { name: "Quota fissa", kind: "monthly", amount: 8.5, exempt: false, yearly: 102 },
-    { name: "Quota potenza", kind: "per_kw_monthly", amount: 1.85, power: 3, exempt: false, yearly: 66.6 },
-    { name: "Canone RAI", kind: "yearly", amount: 90, exempt: true, yearly: 90 },
-    { name: "Oneri di sistema", kind: "per_kwh", amount: 0.035, exempt: false, yearly: null },
-    { name: "IVA", kind: "percent", amount: 10, yearly: null },
-  ];
-  const EXTRA = 0.035; // sum of the costs per kWh, as in the cost statistic
-  const VAT = 1.1; // the percentage, on the energy and the costs per kWh
-  const HOUR_PRICES = Object.fromEntries(Object.entries(PRICES).map(([b, p]) => [b, (p + EXTRA) * VAT]));
-  const CATS = ["comfort_ambientale", "standby", "lavare", "elettronica_luci", "refrigerare", "cucinare", "ricarica_elettrica", "altro"];
-  const NAMES = ["Comfort Ambientale (HVAC)", "Standby", "Lavare", "Elettronica e luci", "Refrigerare", "Cucinare", "Ricarica elettrica", "Altro"];
-  const SHARES = [0.22, 0.12, 0.1, 0.16, 0.14, 0.1, 0.06, 0.1];
-  const P = "plenitude:luce_demo";
-  function band(t) {
-    const d = new Date(t), h = d.getHours(), w = d.getDay();
-    if (w === 0 || h < 7 || h >= 23) return "f3";
-    if (w === 6) return "f2";
-    return h >= 8 && h < 19 ? "f1" : "f2";
-  }
-  function kwh(t) {
-    const d = new Date(t), h = d.getHours();
-    const season = 1 + 0.35 * Math.cos(((d.getMonth() + 0.5) / 12) * 2 * Math.PI);
-    const shape = 0.18 + 0.25 * Math.exp(-((h - 8) ** 2) / 4) + 0.45 * Math.exp(-((h - 20) ** 2) / 5);
-    const noise = 0.85 + 0.3 * Math.abs(Math.sin(t / 3.7e6));
-    return shape * season * noise;
-  }
-  function valueOf(id, t) {
-    if (t < FIRST || t >= LAST) return null;
-    const key = id.slice(P.length + 1);
-    const v = kwh(t);
-    if (key === "consumo") return v;
-    // ?nocost: the cost statistic has no rows (being rewritten, or never written), as on a server on 2026-11-23.
-    if (key === "costo") return location.search.includes("nocost") ? null : v * HOUR_PRICES[band(t)];
-    if (key === "f1" || key === "f2" || key === "f3") return band(t) === key ? v : 0;
-    return null;
-  }
-  function stepStart(t, period) {
-    const d = new Date(t);
-    if (period === "hour") return t + 3600000;
-    if (period === "day") return new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1).getTime();
-    return new Date(d.getFullYear(), d.getMonth() + 1, 1).getTime();
-  }
-  function statistics(msg) {
-    const out = {};
-    const start = Date.parse(msg.start_time), end = Date.parse(msg.end_time);
-    for (const id of msg.statistic_ids) {
-      const rows = [];
-      const cat = CATS.findIndex((c) => id.endsWith("_cat_" + c));
-      for (let b = start; b < end; b = stepStart(b, msg.period)) {
-        const e = Math.min(stepStart(b, msg.period), end);
-        let sum = null;
-        for (let t = b; t < e; t += 3600000) {
-          const v = cat >= 0 ? (valueOf(P + "_consumo", t) ?? null) : valueOf(id, t);
-          if (v !== null) sum = (sum || 0) + (cat >= 0 ? v * SHARES[cat] : v);
-        }
-        if (sum !== null) rows.push({ start: b, end: e, change: sum });
-      }
-      out[id] = rows;
-    }
-    return out;
-  }
-  const requests = { info: 0, statistics: 0 };
-  const connection = {}; // one connection for the page, as in Home Assistant
-  function makeHass(dark, lang = "it") {
-    return {
-      language: lang, locale: { language: lang }, themes: { darkMode: dark }, connection,
-      async callWS(msg) {
-        if (msg.type === "plenitude/info") {
-          requests.info += 1;
-          return { entries: [{
-            entry_id: "demo", title: "Plenitude luce", version: "harness", first_day: "2026-01-04", last_day: LAST_DAY, price_mode: "three", prices: PRICES,
-            hour_prices: HOUR_PRICES, costs: COSTS, currency: "EUR",
-            statistics: { consumo: P + "_consumo", f1: P + "_f1", f2: P + "_f2", f3: P + "_f3", costo: P + "_costo" },
-            categories: CATS.map((c, i) => ({ key: c, name: NAMES[i], statistic_id: P + "_cat_" + c })),
-          }] };
-        }
-        if (msg.type === "recorder/statistics_during_period") {
-          requests.statistics += 1;
-          await new Promise((resolve) => setTimeout(resolve, 200)); // a recorder that takes its time
-          return statistics(msg);
-        }
-        throw new Error("unexpected " + msg.type);
-      },
-    };
-  }
   const configs = [
     { type: "plenitude-consumption-card", period: "month", view: "bands" },
     { type: "plenitude-billing-card", start_date: "2026-11-01", months: "2" },

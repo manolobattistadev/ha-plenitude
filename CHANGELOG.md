@@ -4,6 +4,17 @@ All notable changes to this project are listed here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [semantic versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- Example dashboard with both cards (`examples/dashboard.yaml`) and its screenshots in the README, light and dark,
+  in English and Italian, drawn by `tests/frontend/dashboard.html` with synthetic consumption and the prices and
+  costs of a real contract.
+
+### Changed
+- `tests/frontend/harness.html` and `dashboard.html` share their fake `hass` (`tests/frontend/fake-hass.js`): single
+  price, costs per kWh excluded from the percentages, two-monthly costs, power of 6 kW.
+
 ## [0.5.2] - 2026-11-24
 
 ### Fixed
