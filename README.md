@@ -1,4 +1,4 @@
-# Eni Plenitude for Home Assistant
+# Eni Plenitude - Italian Electricity Energy Tracking for Home Assistant
 
 [![Marketplace and HACS: custom repository](https://img.shields.io/badge/Marketplace%20%7C%20HACS-custom%20repository-41BDF5)](#installation)
 [![Home Assistant 2026.9+](https://img.shields.io/badge/Home%20Assistant-2026.9%2B-18BCF2)](https://www.home-assistant.io/)
