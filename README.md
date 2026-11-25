@@ -31,6 +31,14 @@ It is an integration, not an add-on: it works with every installation type (Home
 > the same web services as the customer area, which are not documented and can change without notice. It makes
 > a few requests a day, like a person checking the customer area.
 
+> [!NOTE]
+> **Built with AI.** This software is developed with strong assistance from AI coding agents, with a human
+> leading the ideas, the design decisions, the testing on a real customer area and the debugging. This is
+> stated openly because it shaped how the project was built. If you are not comfortable with AI-developed
+> code, this software is not for you.
+>
+> *— loosely quoting the great [antirez](https://github.com/antirez)*
+
 ## Contents
 - [Requirements](#requirements)
 - [Installation](#installation)

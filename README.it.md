@@ -31,6 +31,14 @@ Un'integrazione di Home Assistant che porta in Home Assistant i consumi di luce 
 > stessi servizi web dell'area clienti, che non sono documentati e possono cambiare senza preavviso. Fa poche
 > richieste al giorno, come una persona che controlla l'area clienti.
 
+> [!NOTE]
+> **Sviluppato con l'AI.** Questo software è sviluppato con un forte aiuto di agenti AI di programmazione,
+> mentre una persona guida le idee, le scelte di progetto, le prove su un'area clienti reale e il debug. È
+> dichiarato apertamente perché ha determinato il modo in cui il progetto è stato costruito. Se il codice
+> sviluppato con l'AI non ti convince, questo software non fa per te.
+>
+> *— semicit. del grande [antirez](https://github.com/antirez)*
+
 ## Indice
 - [Requisiti](#requisiti)
 - [Installazione](#installazione)
