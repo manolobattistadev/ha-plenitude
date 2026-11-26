@@ -11,6 +11,8 @@ __pycache__/
 # Never in the repository: traffic captures, sessions, credentials
 *.har
 sessione*.json
+# raw answers saved by scripts/prototipo.py gas --salva
+*.jsonl
 .env
 secrets.yaml
 
