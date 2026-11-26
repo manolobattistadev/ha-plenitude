@@ -1,4 +1,4 @@
-# Eni Plenitude - Italian Electricity Energy Tracking for Home Assistant
+# Eni Plenitude - Italian Electricity and Gas Energy Tracking for Home Assistant
 
 [![Marketplace and HACS: custom repository](https://img.shields.io/badge/Marketplace%20%7C%20HACS-custom%20repository-41BDF5)](#installation)
 [![Home Assistant 2026.9+](https://img.shields.io/badge/Home%20Assistant-2026.9%2B-18BCF2)](https://www.home-assistant.io/)
@@ -7,7 +7,7 @@
 
 **English** · [Italiano](README.it.md)
 
-A Home Assistant integration that brings the electricity consumption of your
+A Home Assistant integration that brings the electricity and gas consumption of your
 [Eni Plenitude](https://eniplenitude.com) customer area into Home Assistant:
 
 - hourly consumption as **long-term statistics**, with its real date, ready for the Energy dashboard;
@@ -16,6 +16,8 @@ A Home Assistant integration that brings the electricity consumption of your
 - the **cost**, from the prices you enter (single price, two or three bands) plus **as many other costs as you
   want** (monthly, two-monthly, yearly, per kW, per kWh or a percentage: TV licence, fixed fee, power fee,
   system charges, VAT…);
+- the **gas** consumption, month by month (day by day where the meter sends daily readings), in m³ for the gas
+  section of the Energy dashboard, with its cost;
 - two **dashboard cards**: a consumption chart with a period of your choice, and the **current bill** (kWh and
   euro of the billing period so far, with an estimate at the end of the period).
 
@@ -58,7 +60,8 @@ It is an integration, not an add-on: it works with every installation type (Home
 - An Eni Plenitude customer area account with **email and password** (sign-in with social accounts is not
   supported).
 - An **electricity** supply for which the customer area shows the consumption analysis (consumption every
-  15 minutes, usually available with second-generation smart meters). Gas is not supported yet.
+  15 minutes, usually available with second-generation smart meters), or a **gas** supply for which it shows the
+  consumption (monthly, or daily with the meters that send daily readings).
 
 ## Installation
 
@@ -92,8 +95,8 @@ Marketplace takes over HACS and the repositories added to it, Eni Plenitude incl
 ## Configuration
 1. Go to **Settings → Devices & services → Add integration** and search for **Eni Plenitude**.
 2. Enter the email and password of the customer area.
-3. If the account has more than one electricity supply, choose the one to import. To import another one, add
-   the integration again.
+3. If the account has more than one supply (electricity or gas), choose the one to import. To import another one,
+   for example the gas after the electricity, add the integration again.
 
 The first import starts right away, in the background: it reads the history going back from yesterday, three days
 at a time, until it finds a month without data (at most three years). The last two weeks appear in a few seconds;
@@ -187,6 +190,27 @@ with the right dates.
 
 Home Assistant cannot compute the cost of imported statistics from a price, so the integration computes it.
 Data arrive about two days late: the last two days stay empty until Plenitude publishes them.
+
+### Gas
+A gas supply has its own entry, with the statistics `plenitude:gas_<key>_consumo` (m³) and, with a price or costs,
+`plenitude:gas_<key>_costo` (EUR), where the key is a short hash of the PDR. A Smc is counted as a m³.
+
+The customer area gives gas **one value per month** (the meter reading); the daily view exists only for the meters
+that send daily readings. The integration writes one value per day: the real days where there are, otherwise the
+value of the month spread evenly over its days, so that every month has its right total and the daily view has no
+spike on the first day. A month read later, or with some real days, is rewritten. The last three months are checked
+again at every sync.
+
+**Price.** In **Configure**: no price or a single price in euro per Smc. Costs are added as for electricity; for a
+gas supply the costs *per kWh* are per Smc.
+
+**Sensors.** *Last month available* (its first day), *Gas consumption of the last month* (m³) and, with a price or
+costs, *Gas cost of the last month*.
+
+**Energy dashboard.** **Settings → Dashboards → Energy → Gas consumption → Add gas source**, statistic *Plenitude gas
+consumption* (*Plenitude gas consumo* on an Italian server), and its cost statistic as total costs.
+
+The cards show electricity only.
 
 ## Cards
 The integration ships two cards and loads them on every dashboard by itself. You do not need to install them or
@@ -346,7 +370,9 @@ To report a vulnerability, see [SECURITY.md](SECURITY.md).
   like reading or billing periods).
 - The cost is an estimate from the prices, costs and percentages you enter: bills also contain adjustments and
   estimated readings that the integration cannot know.
-- Electricity only; gas is not supported yet.
+- Gas comes month by month: the days of a month without daily readings are an even split of its value, not a
+  measure.
+- The cards show electricity only; gas is in the Energy dashboard and in its sensors.
 
 ## Development
 See [CONTRIBUTING.md](CONTRIBUTING.md): structure of the code, tests on the minimum and latest Home Assistant, the

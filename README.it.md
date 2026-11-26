@@ -7,7 +7,7 @@
 
 [English](README.md) · **Italiano**
 
-Un'integrazione di Home Assistant che porta in Home Assistant i consumi di luce della tua area clienti
+Un'integrazione di Home Assistant che porta in Home Assistant i consumi di luce e gas della tua area clienti
 [Eni Plenitude](https://eniplenitude.com):
 
 - i consumi orari come **statistiche storiche**, con la loro data reale, pronti per la dashboard Energia;
@@ -16,6 +16,8 @@ Un'integrazione di Home Assistant che porta in Home Assistant i consumi di luce 
 - il **costo**, dai prezzi che inserisci (prezzo unico, due o tre fasce) più **tutti gli altri costi che vuoi**
   (mensili, bimestrali, annuali, per kW, per kWh o in percentuale: canone RAI, quota fissa, quota potenza, oneri di
   sistema, IVA…);
+- i consumi del **gas**, mese per mese (giorno per giorno dove il contatore manda letture giornaliere), in m³ per la
+  sezione gas della dashboard Energia, con il loro costo;
 - due **card** per le dashboard: il grafico dei consumi con il periodo che preferisci e la **bolletta in corso**
   (kWh ed euro del periodo di fatturazione finora, con una stima a fine periodo).
 
@@ -58,7 +60,8 @@ Un'integrazione di Home Assistant che porta in Home Assistant i consumi di luce 
 - Un account dell'area clienti Eni Plenitude con **email e password** (l'accesso con account social non è
   supportato).
 - Una fornitura di **luce** per cui l'area clienti mostra l'analisi dei consumi (consumi ogni 15 minuti, di solito
-  disponibili con i contatori elettronici di seconda generazione). Il gas non è ancora supportato.
+  disponibili con i contatori elettronici di seconda generazione), o una fornitura di **gas** per cui mostra i
+  consumi (mensili, o giornalieri con i contatori che mandano letture giornaliere).
 
 ## Installazione
 
@@ -92,8 +95,8 @@ Marketplace prende in carico HACS e i repository aggiunti, Eni Plenitude compres
 ## Configurazione
 1. Vai in **Impostazioni → Dispositivi e servizi → Aggiungi integrazione** e cerca **Eni Plenitude**.
 2. Inserisci email e password dell'area clienti.
-3. Se nell'account ci sono più forniture luce, scegli quella da importare. Per importarne un'altra, aggiungi di
-   nuovo l'integrazione.
+3. Se nell'account ci sono più forniture (luce o gas), scegli quella da importare. Per importarne un'altra, per
+   esempio il gas dopo la luce, aggiungi di nuovo l'integrazione.
 
 Il primo import parte subito, in background: legge lo storico all'indietro da ieri, tre giorni alla volta, finché
 trova un mese senza dati (al massimo tre anni). Le ultime due settimane compaiono in pochi secondi; il resto dello
@@ -186,6 +189,27 @@ giuste.
 Home Assistant non sa calcolare il costo delle statistiche importate a partire da un prezzo, quindi lo calcola
 l'integrazione. I dati arrivano con circa due giorni di ritardo: gli ultimi due giorni restano vuoti finché
 Plenitude non li pubblica.
+
+### Gas
+Una fornitura gas ha la sua voce, con le statistiche `plenitude:gas_<chiave>_consumo` (m³) e, con un prezzo o dei
+costi, `plenitude:gas_<chiave>_costo` (EUR), dove la chiave è un breve hash del PDR. Un Smc vale un m³.
+
+L'area clienti dà il gas **un valore al mese** (la lettura del contatore); la vista giornaliera c'è solo per i
+contatori che mandano letture giornaliere. L'integrazione scrive un valore al giorno: i giorni veri dove ci sono,
+altrimenti il valore del mese diviso in parti uguali sui suoi giorni, così ogni mese ha il suo totale giusto e la
+vista giornaliera non ha un picco il primo del mese. Un mese letto più tardi, o con alcuni giorni veri, viene
+riscritto. Gli ultimi tre mesi vengono richiesti di nuovo a ogni aggiornamento.
+
+**Prezzo.** In **Configura**: nessun prezzo o un prezzo unico in euro per Smc. I costi si aggiungono come per la luce;
+per una fornitura gas i costi *per kWh* sono per Smc.
+
+**Sensori.** *Ultimo mese disponibile* (il suo primo giorno), *Consumo gas dell'ultimo mese* (m³) e, con un prezzo o
+dei costi, *Costo gas dell'ultimo mese*.
+
+**Dashboard Energia.** **Impostazioni → Dashboard → Energia → Consumo di gas → Aggiungi fonte di gas**, statistica
+*Plenitude gas consumo*, e la sua statistica del costo come costi totali.
+
+Le card mostrano solo la luce.
 
 ## Card
 L'integrazione porta con sé due card e le carica da sola in ogni dashboard: non vanno installate né aggiunte alle
@@ -347,7 +371,9 @@ Per segnalare una vulnerabilità vedi [SECURITY.md](SECURITY.md).
   periodi di lettura o di fatturazione).
 - Il costo è una stima dai prezzi, dai costi e dalle percentuali che inserisci: le bollette contengono anche
   conguagli e letture stimate che l'integrazione non può conoscere.
-- Solo luce; il gas non è ancora supportato.
+- Il gas arriva mese per mese: i giorni di un mese senza letture giornaliere sono una divisione in parti uguali del
+  suo valore, non una misura.
+- Le card mostrano solo la luce; il gas è nella dashboard Energia e nei suoi sensori.
 
 ## Sviluppo
 Vedi [CONTRIBUTING.md](CONTRIBUTING.md) (in inglese): struttura del codice, test sulla versione minima e

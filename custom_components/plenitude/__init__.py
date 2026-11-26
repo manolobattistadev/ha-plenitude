@@ -1,4 +1,4 @@
-"""Eni Plenitude: electricity consumption from the Plenitude customer area as long-term statistics."""
+"""Eni Plenitude: electricity and gas consumption from the Plenitude customer area as long-term statistics."""
 
 from __future__ import annotations
 
@@ -19,8 +19,9 @@ from homeassistant.helpers.update_coordinator import UpdateFailed
 
 from . import websocket
 from .api import PlenitudeError, safe_error
-from .const import CARDS_FILE, CARDS_URL, DOMAIN
-from .coordinator import PlenitudeConfigEntry, PlenitudeCoordinator, async_close_login, cost_items
+from .const import CARDS_FILE, CARDS_URL, COMMODITY_GAS, DOMAIN
+from .coordinator import PlenitudeConfigEntry, PlenitudeCoordinator, async_close_login, commodity, cost_items
+from .gas import GasCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -51,7 +52,8 @@ async def _async_register_cards(hass: HomeAssistant) -> None:
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: PlenitudeConfigEntry) -> bool:
-    coordinator = PlenitudeCoordinator(hass, entry)
+    coordinator_class = GasCoordinator if commodity(entry) == COMMODITY_GAS else PlenitudeCoordinator
+    coordinator = coordinator_class(hass, entry)
     try:
         # Session and supply first: a refused login starts the re-authentication (ConfigEntryAuthFailed
         # passes through), a network problem retries the setup later.

@@ -1,5 +1,5 @@
 """Sensors: the last day with data, its consumption and its cost (energy, costs per kWh and percentages on them, no
-periodic costs).
+periodic costs). Gas: the last month with a reading, its volume and its cost.
 
 They have no ``state_class`` on purpose: the history is in the imported statistics, and a sensor with a
 state class would produce a second, misplaced copy (the values refer to two days ago).
@@ -12,13 +12,13 @@ from dataclasses import dataclass
 from datetime import date
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorEntityDescription
-from homeassistant.const import UnitOfEnergy
+from homeassistant.const import UnitOfEnergy, UnitOfVolume
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import CONF_SUPPLY, DOMAIN
+from .const import COMMODITY_GAS, CONF_SUPPLY, DOMAIN
 from .coordinator import CURRENCY, PlenitudeConfigEntry, PlenitudeCoordinator, PlenitudeData
 from .texts import text
 
@@ -56,13 +56,40 @@ SENSORS = (
 )
 
 
+GAS_SENSORS = (
+    PlenitudeSensorDescription(
+        key="ultimo_mese",
+        translation_key="ultimo_mese",
+        device_class=SensorDeviceClass.DATE,
+        value=lambda data: data.last_month,
+    ),
+    PlenitudeSensorDescription(
+        key="consumo_ultimo_mese",
+        translation_key="consumo_ultimo_mese",
+        device_class=SensorDeviceClass.GAS,
+        native_unit_of_measurement=UnitOfVolume.CUBIC_METERS,
+        suggested_display_precision=1,
+        value=lambda data: data.last_month_volume,
+    ),
+    PlenitudeSensorDescription(
+        key="costo_ultimo_mese",
+        translation_key="costo_ultimo_mese",
+        device_class=SensorDeviceClass.MONETARY,
+        native_unit_of_measurement=CURRENCY,
+        suggested_display_precision=2,
+        value=lambda data: data.last_month_cost,
+        needs_cost=True,
+    ),
+)
+
+
 async def async_setup_entry(
     hass: HomeAssistant, entry: PlenitudeConfigEntry, async_add_entities: AddConfigEntryEntitiesCallback
 ) -> None:
     coordinator = entry.runtime_data
     async_add_entities(
         PlenitudeSensor(coordinator, description)
-        for description in SENSORS
+        for description in (GAS_SENSORS if coordinator.commodity == COMMODITY_GAS else SENSORS)
         if coordinator.has_cost or not description.needs_cost
     )
 
@@ -80,7 +107,7 @@ class PlenitudeSensor(CoordinatorEntity[PlenitudeCoordinator], SensorEntity):
             identifiers={(DOMAIN, key)},
             name=coordinator.config_entry.title,
             manufacturer="Eni Plenitude",
-            model=text(coordinator.language, "model"),
+            model=text(coordinator.language, "gas_model" if coordinator.commodity == COMMODITY_GAS else "model"),
             entry_type=DeviceEntryType.SERVICE,
         )
 

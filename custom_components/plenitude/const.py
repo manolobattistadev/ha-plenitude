@@ -12,7 +12,11 @@ VERSION = "0.5.4"
 CARDS_URL = "/plenitude_static"
 CARDS_FILE = "plenitude-cards.js"
 
-CONF_SUPPLY = "supply"  # key of the supply: hash of the POD, never the POD itself
+CONF_SUPPLY = "supply"  # key of the supply: hash of the POD (PDR for gas), never the code itself
+# Commodity of the entry. The entries made before gas was supported have no commodity: they are electricity.
+CONF_COMMODITY = "commodity"
+COMMODITY_POWER = "luce"
+COMMODITY_GAS = "gas"
 
 # The Gigya session lasts what the login asks for: 30 days were granted on 2026-11-22.
 SESSION_EXPIRATION = 30 * 24 * 3600
@@ -60,5 +64,12 @@ def supply_key(pod: str) -> str:
     return hashlib.sha256(pod.strip().upper().encode()).hexdigest()[:10]
 
 
-def statistic_prefix(key: str) -> str:
-    return f"{DOMAIN}:luce_{key}"
+# Gas: the customer area gives one value per month (Smc), and per day only where the meter sends daily readings
+# (none on 2026-11-26). The months and the days are asked again for this many months back, in case a reading
+# arrives late or is corrected; at most GAS_HISTORY_YEARS years of history on the first import.
+GAS_RECHECK_MONTHS = 3
+GAS_HISTORY_YEARS = 3
+
+
+def statistic_prefix(key: str, commodity: str = COMMODITY_POWER) -> str:
+    return f"{DOMAIN}:{commodity}_{key}"

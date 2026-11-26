@@ -55,6 +55,12 @@ VIEW_WEEK = "1"  # WEEKLY: one value per day
 VIEW_MONTH = "2"  # MONTHLY: one value per day
 VIEW_YEAR = "3"  # YEARLY: one value per month
 
+# Commodities: ``tipo`` of the list of supplies (electricity is ``POWER``) and ``clientType`` of the energy profile.
+KIND_GAS = "GAS"
+PROFILE_LIGHT = "LIGHT"
+PROFILE_GAS = "GAS"
+STATUS_DATA = "DATA"
+
 # activityId of the estimated breakdown (Midori). 0 is "Energia attiva", the measured total.
 TOTAL_ACTIVITY = 0
 CATEGORIES: dict[int, str] = {
@@ -116,6 +122,16 @@ class Supply:
     status: str | None = None  # ``status`` of the list of supplies, for example ``ATTIVO``
     user_type: str | None = None  # ``tipoUtente``: ``RETAIL`` (households) or ``PMI`` (businesses)
 
+    @property
+    def is_gas(self) -> bool:
+        """A gas supply: ``tipo`` GAS in the list of supplies (electricity is ``POWER``), or a PDR without a POD."""
+        return self.kind.upper() == KIND_GAS or bool(self.pdr and not self.pod)
+
+    @property
+    def code(self) -> str:
+        """POD of an electricity supply, PDR of a gas supply (personal data: never log it)."""
+        return (self.pdr if self.is_gas else self.pod) or ""
+
     def summary(self) -> str:
         """Description of the supply without its codes, for logs and bug reports."""
         analysis = {True: "yes", False: "no", None: "?"}[self.analysis]
@@ -158,6 +174,15 @@ class MonthConsumption:
     status: str | None
     days: dict[str, dict[date, float]]
     names: dict[str, str]
+
+
+@dataclass
+class GasYear:
+    """Gas consumption of one year, one value per month (Smc), as the ``YEARLY`` view gives it."""
+
+    year: int
+    status: str | None
+    months: dict[tuple[int, int], float]
 
 
 def token_lifetime(jwt: str) -> int:
@@ -279,6 +304,44 @@ def _readings(items: list[dict[str, Any]] | None) -> list[Reading]:
         start = datetime.fromtimestamp(int(item["startTime"]), ROME)
         readings.append(Reading(start=start, kwh=float(item["consumption"])))
     return readings
+
+
+def _match_profile(supplies: list[Supply], item: dict[str, Any]) -> None:
+    """Give the ``contractId``/``houseId`` of an entry of the energy profile to its supply.
+
+    The profile has one entry per commodity, and both entries carry the POD (``lightCode``) and the PDR
+    (``gasCode``) of the house: only ``clientType`` (``LIGHT`` or ``GAS``) tells them apart (capture of
+    2026-11-26; the two entries share the contract and have different houses).
+    """
+    client_type = str(item.get("clientType") or "").upper()
+    for supply in supplies:
+        if supply.is_gas:
+            if client_type != PROFILE_GAS or not supply.pdr or item.get("gasCode") != supply.pdr:
+                continue
+        elif client_type not in ("", PROFILE_LIGHT) or not supply.pod or item.get("lightCode") != supply.pod:
+            continue
+        if supply.contract_id is not None:
+            continue  # already matched by an earlier answer
+        supply.contract_id = str(item["contractId"])
+        supply.house_id = str(item["houseId"])
+        if not supply.is_gas:
+            supply.contract_power = _power(item.get("contractPower"))
+        return
+
+
+def year_period(year: int) -> dict[str, str]:
+    """``startTime``/``endTime`` of one year, as the web app sends them (capture of 2026-11-26): 1 January at 00:00Z
+    and 31 December at 23:00Z."""
+    return {"startTime": f"{year}-01-01T00:00:00.000Z", "endTime": f"{year}-12-31T23:00:00.000Z"}
+
+
+def _gas_month(entry: dict[str, Any]) -> tuple[int, int] | None:
+    """Month of an entry of the gas year view: ``startTime`` is the local start of the month (epoch seconds)."""
+    start = entry.get("startTime")
+    if isinstance(start, int | float) and start > 0:
+        local = datetime.fromtimestamp(start, ROME)
+        return local.year, local.month
+    return None
 
 
 class PlenitudeClient:
@@ -548,7 +611,9 @@ class PlenitudeClient:
         2026-11-22): only when a supply has the consumption analysis (``flagMidori``), with the POD of the
         electricity supply and the PDR of the first gas supply in the same request (``""`` when there is none).
         Until 0.5.3 the integration also asked it for each gas supply, with an empty POD, which the web app never
-        does. A supply refused with HTTP 400 stays without analysis: the others are still read.
+        does; now only an account without electricity asks it that way, for its gas supply. The answer has one entry
+        per commodity, matched to the supplies by ``_match_profile``. A supply refused with HTTP 400 stays without
+        analysis: the others are still read.
         """
         data = await self._service("GET", f"/api/contiServices/conti/{account.account_code}/lista-forniture")
         supplies = [
@@ -565,26 +630,21 @@ class PlenitudeClient:
         ]
         if all(supply.analysis is False for supply in supplies):
             return supplies
-        pdr = next((s.pdr for s in supplies if s.pdr and (s.kind == "GAS" or not s.pod)), "")
-        for supply in supplies:
-            if not supply.pod:
-                continue  # gas: the integration reads only electricity
+        pdr = next((s.pdr for s in supplies if s.is_gas and s.pdr), "")
+        # One request per electricity supply, as the web app does; an account with gas only asks with an empty POD.
+        asking = [s for s in supplies if s.pod and not s.is_gas] or [s for s in supplies if s.is_gas and s.pdr][:1]
+        for supply in asking:
             try:
                 profile = await self._service(
                     "POST",
                     f"/api/profilo-energetico-services/{account.account_code}/users/{account.client_code}/supplies",
-                    body={"pod": supply.pod, "pdr": pdr},
+                    body={"pod": "" if supply.is_gas else supply.pod, "pdr": pdr},
                 )
             except PlenitudeBadRequest as err:
                 _LOGGER.warning("Energy profile refused for the supply %s: %s", supply.summary(), safe_error(err))
                 continue
             for item in (profile or {}).get("fornitureClienteMidori4FE", []):
-                if item.get("lightCode") != supply.pod:
-                    continue
-                supply.contract_id = str(item["contractId"])
-                supply.house_id = str(item["houseId"])
-                supply.contract_power = _power(item.get("contractPower"))
-                break
+                _match_profile(supplies, item)
         return supplies
 
     async def get_day(self, account: Account, supply: Supply, day: date) -> DayConsumption:
@@ -646,6 +706,57 @@ class PlenitudeClient:
                 if day is not None and entry.get("consumption") is not None:
                     values[day] = float(entry["consumption"])
         return MonthConsumption(year=year, month=month, status=(data or {}).get("status"), days=days, names=names)
+
+    async def get_gas_year(self, account: Account, supply: Supply, year: int) -> GasYear:
+        """Monthly gas consumption of one year (``YEARLY`` view).
+
+        For gas the server answers every view with ``view: YEARLY`` and gives the months in ``additionalData``
+        (capture of 2026-11-26); the months without a reading are 0.
+        """
+        data = await self._consumptions(account, supply, {**year_period(year), "type": VIEW_YEAR})
+        months: dict[tuple[int, int], float] = {}
+        for entry in (data or {}).get("additionalData") or []:
+            month = _gas_month(entry)
+            if month and month[0] == year and entry.get("consumption") is not None:
+                months[month] = float(entry["consumption"])
+        return GasYear(year=year, status=(data or {}).get("status"), months=months)
+
+    async def get_gas_days(self, account: Account, supply: Supply, year: int, month: int) -> dict[date, float]:
+        """Daily gas consumption of one month (``MONTHLY`` view), when the meter gives it.
+
+        The web app has a daily view for gas, but on 2026-11-26 it answered ``NO_DATA`` (a supply started the
+        month before). The days are read as for electricity (``consumptionList``, days named ``dd/mm``) or from
+        ``additionalData`` with a ``startTime``; an answer of the year view instead (``view: YEARLY``) has no days.
+        """
+        data = await self._consumptions(account, supply, {**month_period(year, month), "type": VIEW_MONTH})
+        if not data or data.get("status") != STATUS_DATA or data.get("view") == "YEARLY":
+            return {}
+        days: dict[date, float] = {}
+        for item in data.get("consumptionList") or []:
+            if item.get("activityId") not in (None, TOTAL_ACTIVITY):
+                continue
+            for entry in item.get("data") or []:
+                day = _day_label(entry.get("name"), year, month)
+                if day is not None and entry.get("consumption") is not None:
+                    days[day] = float(entry["consumption"])
+        if not days:
+            for entry in data.get("additionalData") or []:
+                start = entry.get("startTime")
+                if isinstance(start, int | float) and start > 0 and entry.get("consumption") is not None:
+                    day = datetime.fromtimestamp(start, ROME).date()
+                    if (day.year, day.month) == (year, month):
+                        days[day] = float(entry["consumption"])
+        return days
+
+    async def _consumptions(self, account: Account, supply: Supply, period: dict[str, str]) -> Any:
+        if not supply.contract_id or not supply.house_id:
+            raise PlenitudeError("supply without contractId/houseId: consumption analysis not available")
+        body = {"clientCode": account.client_code, "contractId": supply.contract_id, "houseId": supply.house_id}
+        return await self._service(
+            "POST",
+            f"/api/profilo-energetico-services/{account.account_code}/analysis/consumptions",
+            body={**body, **period},
+        )
 
     async def get_monthly_by_band(self, account: Account) -> list[dict[str, Any]]:
         """Monthly consumption per time band F1/F2/F3 (kWh, billing data), raw as returned."""

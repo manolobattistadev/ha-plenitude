@@ -8,6 +8,9 @@ Senza --valori non stampa né identificativi né consumi: solo esiti, durate e c
 Comandi:
   login   [--durata SECONDI]          login completo con le credenziali, salva la sessione
   stato                               controlla, senza password, se la sessione salvata vale ancora
+  gas     [--giorno AAAA-MM-GG] [--valori] [--salva FILE]
+                                      sonda le risposte per la fornitura gas: struttura delle risposte (chiavi,
+                                      tipi, lunghezze), valori mascherati se non si passa --valori
   consumi [--giorno AAAA-MM-GG] [--valori]
                                       scarica un giorno (predefinito: due giorni fa); riusa la sessione,
                                       la rinnova senza password o, se serve, rifà il login
@@ -174,6 +177,140 @@ async def cmd_consumi(args: argparse.Namespace) -> None:
             print(f"  {ora.start:%H:%M}  {ora.kwh:7.3f} kWh")
 
 
+def forma(valore, valori: bool, profondita: int = 0) -> str:
+    """Struttura di una risposta JSON: chiavi, tipi e lunghezze; i valori solo con --valori."""
+    rientro = "  " * profondita
+    if isinstance(valore, dict):
+        righe = []
+        for chiave, v in valore.items():
+            if isinstance(v, (dict, list)):
+                righe.append(f"{rientro}{chiave}:")
+                righe.append(forma(v, valori, profondita + 1))
+            else:
+                righe.append(f"{rientro}{chiave}: {mostra(v, valori)}")
+        return "\n".join(righe) or f"{rientro}{{}}"
+    if isinstance(valore, list):
+        if not valore:
+            return f"{rientro}[] (vuota)"
+        testa = f"{rientro}[{len(valore)} elementi] primo:"
+        primo = valore[0]
+        corpo = (
+            forma(primo, valori, profondita + 1)
+            if isinstance(primo, (dict, list))
+            else f"{rientro}  {mostra(primo, valori)}"
+        )
+        return f"{testa}\n{corpo}"
+    return f"{rientro}{mostra(valore, valori)}"
+
+
+def mostra(v, valori: bool) -> str:
+    if v is None or isinstance(v, bool):
+        return repr(v)
+    if valori:
+        return repr(v)
+    if isinstance(v, (int, float)):
+        return type(v).__name__
+    testo = str(v)
+    return f"str({len(testo)})" if len(testo) > 3 else repr(testo)
+
+
+async def sonda(client: api.PlenitudeClient, nome: str, metodo: str, percorso: str, args, **kw):
+    chiavi = f"corpo chiavi {sorted(kw['body'])}" if "body" in kw else ""
+    print(f"\n=== {nome}: {metodo} {api.safe_path(percorso)} {chiavi}")
+    try:
+        dati = await client._service(metodo, percorso, **kw)
+    except api.PlenitudeError as err:
+        print(f"  ERRORE: {err}")
+        return None
+    print(forma(dati, args.valori, 1))
+    if args.salva:
+        with open(args.salva, "a") as f:
+            f.write(json.dumps({"nome": nome, "percorso": percorso, "corpo": kw.get("body"), "risposta": dati}) + "\n")
+    return dati
+
+
+async def cmd_gas(args: argparse.Namespace) -> None:
+    giorno = date.fromisoformat(args.giorno) if args.giorno else date.today() - timedelta(days=3)
+    async with nuova_sessione_http() as http:
+        client = api.PlenitudeClient(http)
+        conto = await assicura_sessione(client, args.durata)
+        salva_stato(client)
+        base = f"/api/profilo-energetico-services/{conto.account_code}"
+        lista = await sonda(
+            client, "lista forniture", "GET", f"/api/contiServices/conti/{conto.account_code}/lista-forniture", args
+        )
+        forniture = (lista or {}).get("fornitura", [])
+        gas = [f for f in forniture if f.get("pdr")]
+        luce = [f for f in forniture if f.get("pod")]
+        print(f"\nForniture: {len(forniture)}, con PDR: {len(gas)}, con POD: {len(luce)}")
+        if not gas:
+            sys.exit("Nessuna fornitura gas (con PDR) nel conto.")
+        pdr = gas[0]["pdr"]
+        pod = luce[0]["pod"] if luce else ""
+        profilo = await sonda(
+            client,
+            "profilo (pod+pdr)",
+            "POST",
+            f"{base}/users/{conto.client_code}/supplies",
+            args,
+            body={"pod": pod, "pdr": pdr},
+        )
+        if not pod:
+            profilo = profilo or await sonda(
+                client,
+                "profilo (solo pdr)",
+                "POST",
+                f"{base}/users/{conto.client_code}/supplies",
+                args,
+                body={"pod": "", "pdr": pdr},
+            )
+        voci = (profilo or {}).get("fornitureClienteMidori4FE", [])
+        candidati = [v for v in voci if pdr in json.dumps(v)] or [v for v in voci if v.get("lightCode") != pod]
+        print(
+            f"\nVoci del profilo: {len(voci)}; che contengono il PDR: {len([v for v in voci if pdr in json.dumps(v)])}"
+        )
+        if not candidati:
+            print("Nessuna voce del profilo per il gas: provo con la voce della luce per vedere se ha campi gas.")
+            candidati = voci
+        for voce in candidati[:2]:
+            contratto, casa = voce.get("contractId"), voce.get("houseId")
+            for chiave in voce:
+                if "gas" in chiave.lower() or "pdr" in chiave.lower() or "commodity" in chiave.lower():
+                    print(f"  campo gas nella voce: {chiave}")
+            if contratto is None:
+                continue
+            for vista, periodo in (
+                (api.VIEW_DAY, api.day_period(giorno)),
+                ("1", api.day_period(giorno - timedelta(days=6)) | {"endTime": api.day_period(giorno)["endTime"]}),
+                (api.VIEW_MONTH, api.month_period(giorno.year, giorno.month)),
+                (
+                    api.VIEW_YEAR,
+                    {
+                        "startTime": api.month_period(giorno.year, 1)["startTime"],
+                        "endTime": api.month_period(giorno.year, 12)["endTime"],
+                    },
+                ),
+            ):
+                corpo = {
+                    "clientCode": conto.client_code,
+                    "contractId": str(contratto),
+                    "houseId": str(casa),
+                    **periodo,
+                    "type": vista,
+                }
+                await sonda(client, f"consumi vista {vista}", "POST", f"{base}/analysis/consumptions", args, body=corpo)
+                await asyncio.sleep(0.4)
+        await sonda(
+            client,
+            "consumptionData",
+            "GET",
+            "/api/consumptionData",
+            args,
+            params={"codiceContoCliente": conto.account_code},
+        )
+        salva_stato(client)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument(
@@ -188,8 +325,12 @@ def main() -> None:
     p = sub.add_parser("consumi")
     p.add_argument("--giorno", help="AAAA-MM-GG (predefinito: due giorni fa)")
     p.add_argument("--valori", action="store_true", help="stampa anche i consumi orari (dati personali)")
+    p = sub.add_parser("gas")
+    p.add_argument("--giorno", help="AAAA-MM-GG (predefinito: tre giorni fa)")
+    p.add_argument("--valori", action="store_true", help="stampa anche codici e consumi (dati personali)")
+    p.add_argument("--salva", help="aggiunge le risposte grezze a questo file JSONL (dati personali)")
     args = parser.parse_args()
-    comandi = {"login": cmd_login, "stato": cmd_stato, "consumi": cmd_consumi}
+    comandi = {"login": cmd_login, "stato": cmd_stato, "consumi": cmd_consumi, "gas": cmd_gas}
     try:
         asyncio.run(comandi[args.comando](args))
     except api.PlenitudeAuthError as err:

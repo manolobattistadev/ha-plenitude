@@ -1,4 +1,5 @@
-"""Configuration: credentials, choice of the supply, re-authentication, prices and additional costs."""
+"""Configuration: credentials, choice of the supply (electricity or gas), re-authentication, prices and additional
+costs."""
 
 from __future__ import annotations
 
@@ -31,10 +32,10 @@ from homeassistant.helpers.selector import (
 )
 
 from .api import PlenitudeAuthError, PlenitudeClient, PlenitudeError, PlenitudeSessionExpired, Supply, safe_error
-from .bands import PRICE_FIELDS, PRICE_MODE, PRICE_MODES, PRICE_NONE
-from .const import CONF_SUPPLY, DOMAIN, supply_key
+from .bands import PRICE_FIELDS, PRICE_MODE, PRICE_MODES, PRICE_NONE, PRICE_SINGLE
+from .const import COMMODITY_GAS, COMMODITY_POWER, CONF_COMMODITY, CONF_SUPPLY, DOMAIN, supply_key
 from .const import VERSION as INTEGRATION_VERSION
-from .coordinator import PlenitudeConfigEntry
+from .coordinator import PlenitudeConfigEntry, commodity
 from .costs import (
     COST_AMOUNT,
     COST_EXEMPT,
@@ -69,6 +70,9 @@ CREDENTIALS_SCHEMA = vol.Schema(
 # comma in its own way (refused, or lost, depending on the browser), while here "9,15" and "9.15" are the same and
 # anything ambiguous gets a clear error.
 PRICE_SELECTOR = TextSelector(TextSelectorConfig(suffix="€/kWh"))
+GAS_PRICE_SELECTOR = TextSelector(TextSelectorConfig(suffix="€/Smc"))
+# Gas has no bands: no price or a single price per Smc.
+GAS_PRICE_MODES = (PRICE_NONE, PRICE_SINGLE)
 PRICE_RANGE = (0.0, 10.0)
 AMOUNT_RANGE = (-100000.0, 100000.0)  # negative for discounts and bonuses
 POWER_RANGE = (0.1, 999.0)
@@ -88,8 +92,13 @@ UNITS = {KIND_PER_KWH: "€/kWh", KIND_PER_KW_MONTHLY: "€/kW", KIND_PERCENT: "
 AMOUNT_STEPS = {KIND_PER_KW_MONTHLY: "per_kw", KIND_PERCENT: "percent"}
 
 
-def _amount_schema(kind: str) -> vol.Schema:
-    fields: dict[Any, Any] = {vol.Required(COST_AMOUNT): TextSelector(TextSelectorConfig(suffix=UNITS.get(kind, "€")))}
+def _unit(kind: str, gas: bool) -> str:
+    """Unit of the amount of a cost: the costs "per kWh" of a gas supply are per Smc."""
+    return "€/Smc" if gas and kind == KIND_PER_KWH else UNITS.get(kind, "€")
+
+
+def _amount_schema(kind: str, gas: bool = False) -> vol.Schema:
+    fields: dict[Any, Any] = {vol.Required(COST_AMOUNT): TextSelector(TextSelectorConfig(suffix=_unit(kind, gas)))}
     if kind == KIND_PER_KW_MONTHLY:
         fields[vol.Required(COST_POWER)] = TextSelector(TextSelectorConfig(suffix="kW"))
     if kind != KIND_PERCENT:
@@ -97,7 +106,7 @@ def _amount_schema(kind: str) -> vol.Schema:
     return vol.Schema(fields)
 
 
-async def _electric_supplies(hass: HomeAssistant, email: str, password: str) -> list[Supply]:
+async def _usable_supplies(hass: HomeAssistant, email: str, password: str) -> list[Supply]:
     """Log in with a throw-away session and return the supplies with the consumption analysis."""
     session = async_create_clientsession(hass, auto_cleanup=False, cookie_jar=aiohttp.CookieJar())
     try:
@@ -112,20 +121,25 @@ async def _electric_supplies(hass: HomeAssistant, email: str, password: str) -> 
             await client.logout(account)
     finally:
         session.detach()  # the connector is shared with Home Assistant: detach, do not close
-    usable = [s for s in supplies if s.pod and s.contract_id and s.house_id]
+    usable = [s for s in supplies if s.code and s.contract_id and s.house_id]
     if not usable:
         # What the account has, without its codes: enough for a bug report.
         _LOGGER.warning(
-            "Plenitude %s: no electricity supply with the consumption analysis; supplies of the account: %s",
+            "Plenitude %s: no supply with the consumption analysis; supplies of the account: %s",
             INTEGRATION_VERSION,
             ", ".join(s.summary() for s in supplies) or "none",
         )
     return usable
 
 
-def _label(supply: Supply) -> str:
-    pod = f"POD …{(supply.pod or '')[-4:]}"
-    return f"{supply.address} ({pod})" if supply.address else pod
+def _commodity(supply: Supply) -> str:
+    return COMMODITY_GAS if supply.is_gas else COMMODITY_POWER
+
+
+def _label(supply: Supply, lang: str) -> str:
+    code = f"{'PDR' if supply.is_gas else 'POD'} …{supply.code[-4:]}"
+    name = text(lang, "gas_title" if supply.is_gas else "title")
+    return f"{name}: {supply.address} ({code})" if supply.address else f"{name} ({code})"
 
 
 class PlenitudeConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -147,7 +161,7 @@ class PlenitudeConfigFlow(ConfigFlow, domain=DOMAIN):
 
     async def _check(self, email: str, password: str) -> tuple[list[Supply], str | None]:
         try:
-            supplies = await _electric_supplies(self.hass, email, password)
+            supplies = await _usable_supplies(self.hass, email, password)
         except PlenitudeAuthError as err:
             _LOGGER.warning("Plenitude %s: login refused by Plenitude: %s", INTEGRATION_VERSION, safe_error(err))
             return [], "invalid_auth"
@@ -189,9 +203,17 @@ class PlenitudeConfigFlow(ConfigFlow, domain=DOMAIN):
 
     async def async_step_supply(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         if user_input is not None:
-            chosen = next(s for s in self._supplies if supply_key(s.pod or "") == user_input[CONF_SUPPLY])
+            chosen = next(s for s in self._supplies if supply_key(s.code) == user_input[CONF_SUPPLY])
             return await self._create(chosen, multiple=True)
-        options = [SelectOptionDict(value=supply_key(s.pod or ""), label=_label(s)) for s in self._supplies]
+        configured = {entry.unique_id for entry in self._async_current_entries(include_ignore=False)}
+        lang = self.hass.config.language
+        options = [
+            SelectOptionDict(value=supply_key(s.code), label=_label(s, lang))
+            for s in self._supplies
+            if supply_key(s.code) not in configured
+        ]
+        if not options:
+            return self.async_abort(reason="already_configured")
         return self.async_show_form(
             step_id="supply",
             data_schema=vol.Schema(
@@ -204,14 +226,17 @@ class PlenitudeConfigFlow(ConfigFlow, domain=DOMAIN):
         )
 
     async def _create(self, supply: Supply, multiple: bool) -> ConfigFlowResult:
-        key = supply_key(supply.pod or "")
+        key = supply_key(supply.code)
         await self.async_set_unique_id(key)
         self._abort_if_unique_id_configured()
-        title = text(self.hass.config.language, "title")
-        if multiple:
-            title = f"{title} …{(supply.pod or '')[-4:]}"
+        title = text(self.hass.config.language, "gas_title" if supply.is_gas else "title")
+        # The code only when the account has more supplies of the same commodity.
+        if multiple and sum(s.is_gas == supply.is_gas for s in self._supplies) > 1:
+            title = f"{title} …{supply.code[-4:]}"
         return self.async_create_entry(
-            title=title, data={**self._credentials, CONF_SUPPLY: key}, options={PRICE_MODE: PRICE_NONE}
+            title=title,
+            data={**self._credentials, CONF_SUPPLY: key, CONF_COMMODITY: _commodity(supply)},
+            options={PRICE_MODE: PRICE_NONE},
         )
 
     async def async_step_reauth(self, entry_data: Mapping[str, Any]) -> ConfigFlowResult:
@@ -222,7 +247,7 @@ class PlenitudeConfigFlow(ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
         if user_input is not None:
             supplies, error = await self._check(entry.data[CONF_EMAIL], user_input[CONF_PASSWORD])
-            if not error and not any(supply_key(s.pod or "") == entry.data[CONF_SUPPLY] for s in supplies):
+            if not error and not any(supply_key(s.code) == entry.data[CONF_SUPPLY] for s in supplies):
                 error = "supply_missing"
             if error:
                 errors["base"] = error
@@ -245,33 +270,47 @@ class PlenitudeConfigFlow(ConfigFlow, domain=DOMAIN):
 
 
 class PlenitudeOptionsFlow(OptionsFlowWithReload):
-    """Price of the energy: none, single, two bands (F1, F23) or three bands (F1, F2, F3)."""
+    """Price of the energy: none, single, two bands (F1, F23) or three bands (F1, F2, F3). Gas: none or a single
+    price per Smc."""
 
     def __init__(self) -> None:
         self._mode = PRICE_NONE
+
+    @property
+    def _gas(self) -> bool:
+        return commodity(self.config_entry) == COMMODITY_GAS
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         if user_input is not None:
             self._mode = user_input[PRICE_MODE]
             if self._mode == PRICE_NONE:
                 return self.async_create_entry(data={PRICE_MODE: PRICE_NONE})
-            return await self.async_step_prices()
+            return await (self.async_step_gas_price() if self._gas else self.async_step_prices())
+        modes = GAS_PRICE_MODES if self._gas else PRICE_MODES
         return self.async_show_form(
-            step_id="init",
+            step_id="gas" if self._gas else "init",
             data_schema=vol.Schema(
                 {
                     vol.Required(
                         PRICE_MODE, default=self.config_entry.options.get(PRICE_MODE, PRICE_NONE)
                     ): SelectSelector(
                         SelectSelectorConfig(
-                            options=list(PRICE_MODES), mode=SelectSelectorMode.LIST, translation_key=PRICE_MODE
+                            options=list(modes), mode=SelectSelectorMode.LIST, translation_key=PRICE_MODE
                         )
                     )
                 }
             ),
         )
 
-    async def async_step_prices(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+    async def async_step_gas(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        return await self.async_step_init(user_input)
+
+    async def async_step_gas_price(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        return await self.async_step_prices(user_input, step_id="gas_price")
+
+    async def async_step_prices(
+        self, user_input: dict[str, Any] | None = None, step_id: str = "prices"
+    ) -> ConfigFlowResult:
         fields = PRICE_FIELDS[self._mode]
         errors: dict[str, str] = {}
         if user_input is not None:
@@ -285,11 +324,12 @@ class PlenitudeOptionsFlow(OptionsFlowWithReload):
             if not errors:
                 return self.async_create_entry(data={PRICE_MODE: self._mode, **prices})
         current = self.config_entry.options
-        schema = vol.Schema({vol.Required(field): PRICE_SELECTOR for field in fields})
+        selector = GAS_PRICE_SELECTOR if self._gas else PRICE_SELECTOR
+        schema = vol.Schema({vol.Required(field): selector for field in fields})
         lang = self.hass.config.language
         known = user_input or {f: format_number(current[f], lang) for f in fields if f in current}
         return self.async_show_form(
-            step_id="prices", data_schema=self.add_suggested_values_to_schema(schema, known), errors=errors
+            step_id=step_id, data_schema=self.add_suggested_values_to_schema(schema, known), errors=errors
         )
 
 
@@ -311,6 +351,10 @@ class CostSubentryFlow(ConfigSubentryFlow):
 
     async def async_step_reconfigure(self, user_input: dict[str, Any] | None = None) -> SubentryFlowResult:
         return await self._first("reconfigure", user_input)
+
+    @property
+    def _gas(self) -> bool:
+        return commodity(self._get_entry()) == COMMODITY_GAS
 
     def _editing(self) -> dict[str, Any]:
         """Data of the cost being edited, empty for a new one."""
@@ -364,7 +408,9 @@ class CostSubentryFlow(ConfigSubentryFlow):
                 return self._save(CostItem(name=self._name, kind=kind, amount=amount, power=power, exempt=exempt))
         return self.async_show_form(
             step_id=AMOUNT_STEPS.get(kind, "amount"),
-            data_schema=self.add_suggested_values_to_schema(_amount_schema(kind), user_input or self._known()),
+            data_schema=self.add_suggested_values_to_schema(
+                _amount_schema(kind, self._gas), user_input or self._known()
+            ),
             description_placeholders={"name": self._name},
             errors=errors,
         )

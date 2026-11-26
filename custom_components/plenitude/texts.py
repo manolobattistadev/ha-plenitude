@@ -20,6 +20,8 @@ TEXTS = {
         "band": "consumo {band}",
         "cost": "costo",
         "estimate": "{name} (stima)",
+        "gas_title": "Plenitude gas",
+        "gas_model": "Fornitura gas",
     },
     ENGLISH: {
         "title": "Plenitude electricity",
@@ -28,6 +30,8 @@ TEXTS = {
         "band": "consumption {band}",
         "cost": "cost",
         "estimate": "{name} (estimate)",
+        "gas_title": "Plenitude gas",
+        "gas_model": "Gas supply",
     },
 }
 
