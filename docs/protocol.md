@@ -74,9 +74,31 @@ All under `https://eniplenitude.com/serviceDAp`, with the portal cookies.
   at 23:00Z; the days are named `dd/mm`. `activityId` 0 is the measured total; 1 to 8 are the estimated
   categories: 1 refrigerare, 2 standby, 3 lavare, 4 cucinare, 5 comfort_ambientale, 6 elettronica_luci, 7 altro,
   8 ricarica_elettrica.
+- **Energy profile, one entry per commodity.** With electricity and gas, the answer has two entries,
+  `clientType` `LIGHT` and `GAS`; **both** carry the POD (`lightCode`) and the PDR (`gasCode`) of the house, share
+  the `contractId` and have different `houseId`. Only `clientType` tells them apart (capture of 2026-11-26). In the
+  list of supplies electricity is `tipo: POWER` and gas `tipo: GAS`.
 - Data arrive about two days late; some days are missing in the customer area itself.
 - **Requests at the same time.** Measured on 2026-11-23, same session, rounds interleaved (one at a time, three at
   a time, one, three): 15 day views in 15 s one at a time with a 0.4 s pause, in 5-6 s three at a time with a
   0.4 s pause after each round; average latency 0.6-0.7 s in both, same answers, no errors. The integration asks
   three at a time; a session over in a round is renewed once and the round repeated.
 - Error responses are reported with the path only, with long numbers masked: paths contain customer codes.
+
+## Gas (measured on 2026-11-26)
+Same call, `analysis/consumptions`, with the `contractId` and the `houseId` of the `GAS` entry of the profile.
+
+- The server answers **every** `type` with `view: YEARLY` and `clientType: GAS`. Only `type` 3 (one year,
+  `startTime` 1 January at 00:00Z, `endTime` 31 December at 23:00Z, as the web app sends them) has data: 12 entries in
+  `additionalData`, `{"name": "gen", "startTime": <epoch of the local start of the month>, "endTime": 0,
+  "consumption": 123.0, "percentage": 0}`; `consumptionList` is empty. The months not read yet, and those before the
+  supply started, are `0.0`. The unit is the Smc of the meter reading.
+- `type` 0, 1 and 2 answer `status: NO_DATA` (`previousStatus: DATA`). The web app has a daily view for gas, for the
+  meters that send daily readings; on an account whose supply started the month before it was empty, so the shape of
+  its days is not known yet. The integration reads them, if they come, as for electricity (`consumptionList`, days
+  named `dd/mm`) or from `additionalData` with a `startTime`.
+- `GET /api/consumptionData` also gives the gas months: `{"type": "GAS", "consumptions": [{"month": "Gen",
+  "numericalMonth": 0, "year": "2026", "consumptions": 123, "lastReadingDate": "31/01/2026", …}]}` (not used; values
+  made up, the month is 0-based).
+- In the energy profile the `GAS` entry has `contractPower` 0 and its own `serviceStart`/`serviceLastData` (epoch
+  seconds; `serviceLastData` was the start of the last month with a reading).

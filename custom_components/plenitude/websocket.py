@@ -14,7 +14,7 @@ from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant, callback
 
 from .bands import BANDS, PRICE_MODE, PRICE_NONE, price_of
-from .const import CATEGORY_ORDER, DOMAIN, STAT_COST, STAT_ENERGY
+from .const import CATEGORY_ORDER, COMMODITY_POWER, DOMAIN, STAT_COST, STAT_ENERGY
 from .coordinator import CURRENCY, PlenitudeCoordinator
 from .costs import hour_price
 
@@ -65,7 +65,8 @@ def ws_info(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg
     entries = [
         entry_info(entry.entry_id, entry.title, entry.runtime_data)
         for entry in hass.config_entries.async_entries(DOMAIN)
-        if entry.state is ConfigEntryState.LOADED
+        # The cards show electricity only (hours and bands): gas is in the Energy dashboard and in its sensors.
+        if entry.state is ConfigEntryState.LOADED and entry.runtime_data.commodity == COMMODITY_POWER
     ]
     connection.send_result(msg["id"], {"entries": entries})
 

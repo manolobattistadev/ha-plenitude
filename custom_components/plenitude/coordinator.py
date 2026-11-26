@@ -59,6 +59,8 @@ from .bands import BANDS, band
 from .const import (
     CATEGORY_ORDER,
     CATEGORY_PREFIX,
+    COMMODITY_POWER,
+    CONF_COMMODITY,
     CONF_SUPPLY,
     DOMAIN,
     FIRST_RESULTS_DAYS,
@@ -86,6 +88,11 @@ CURRENCY = "EUR"
 type PlenitudeConfigEntry = ConfigEntry[PlenitudeCoordinator]
 
 
+def commodity(entry: ConfigEntry) -> str:
+    """``luce`` or ``gas``: the entries made before gas was supported are electricity."""
+    return str(entry.data.get(CONF_COMMODITY, COMMODITY_POWER))
+
+
 def cost_items(entry: ConfigEntry) -> list[CostItem]:
     """Additional costs of an entry, in the order they were added."""
     return [CostItem.from_data(sub.data) for sub in entry.subentries.values() if sub.subentry_type == COST_SUBENTRY]
@@ -98,6 +105,10 @@ class PlenitudeData:
     last_day: date | None = None
     last_day_kwh: float | None = None
     last_day_cost: float | None = None
+    # Gas: the last month with a reading (its first day), its volume in m³ (Smc) and its cost.
+    last_month: date | None = None
+    last_month_volume: float | None = None
+    last_month_cost: float | None = None
 
 
 def _days(first: date, last: date) -> Iterator[date]:
@@ -143,7 +154,9 @@ async def async_close_login(hass: HomeAssistant, entry_id: str) -> None:
 
 
 class PlenitudeCoordinator(DataUpdateCoordinator[PlenitudeData]):
-    """One supply of one Plenitude account."""
+    """One electricity supply of one Plenitude account (``gas.GasCoordinator`` reads a gas supply)."""
+
+    commodity = COMMODITY_POWER
 
     config_entry: PlenitudeConfigEntry
 
@@ -158,7 +171,7 @@ class PlenitudeCoordinator(DataUpdateCoordinator[PlenitudeData]):
         self._refused: list[str] = []
         self._refusal: PlenitudeBadRequest | None = None
         self.supply: Supply | None = None
-        self.prefix = statistic_prefix(entry.data[CONF_SUPPLY])
+        self.prefix = statistic_prefix(entry.data[CONF_SUPPLY], self.commodity)
         # Portal names of the categories (Italian), updated with the data.
         self.category_names = dict(CATEGORY_NAMES[ITALIAN])
         self._lock = asyncio.Lock()
@@ -349,7 +362,7 @@ class PlenitudeCoordinator(DataUpdateCoordinator[PlenitudeData]):
         supplies = await self._call(lambda: self.client.get_supplies(account))
         wanted = self.config_entry.data[CONF_SUPPLY]
         for supply in supplies:
-            if supply.pod and supply_key(supply.pod) == wanted:
+            if self._is_mine(supply, wanted):
                 if not supply.contract_id or not supply.house_id:
                     raise UpdateFailed(translation_domain=DOMAIN, translation_key="analysis_unavailable")
                 self._account, self.supply = account, supply
@@ -365,6 +378,10 @@ class PlenitudeCoordinator(DataUpdateCoordinator[PlenitudeData]):
                 }
                 return
         raise UpdateFailed(translation_domain=DOMAIN, translation_key="supply_missing")
+
+    def _is_mine(self, supply: Supply, wanted: str) -> bool:
+        """The supply of this entry, among those of the account."""
+        return not supply.is_gas and bool(supply.pod) and supply_key(supply.pod or "") == wanted
 
     @staticmethod
     async def _round[T](requests: Sequence[Callable[[], Awaitable[T]]]) -> list[T | PlenitudeBadRequest]:

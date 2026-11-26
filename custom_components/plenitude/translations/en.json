@@ -15,7 +15,7 @@
       },
       "supply": {
         "title": "Supply",
-        "description": "The account has more than one electricity supply: choose the one to import. Add the integration again for the others.",
+        "description": "The account has more than one supply with the consumption analysis (electricity or gas): choose the one to import. Add the integration again for the others.",
         "data": {
           "supply": "Supply"
         }
@@ -31,7 +31,7 @@
     "error": {
       "invalid_auth": "Credentials refused by Plenitude (or an additional verification is required).",
       "cannot_connect": "Cannot reach the Plenitude customer area (the reason is in the Home Assistant log).",
-      "no_supplies": "The account has no electricity supply with the consumption analysis.",
+      "no_supplies": "The account has no electricity or gas supply with the consumption analysis.",
       "supply_missing": "The configured supply is no longer in this account.",
       "unknown": "Unexpected error: see the Home Assistant log.",
       "portal_refused": "Plenitude accepted the login, but the customer area refuses the data of the account. Check that the customer area works in a browser, then try again later. If it keeps happening, turn on the debug log (see the README) and open an issue."
@@ -67,10 +67,27 @@
           "price_f3": "Euro per kWh, nights 23:00-7:00, Sundays and holidays.",
           "price_f23": "Euro per kWh in every hour outside F1."
         }
+      },
+      "gas": {
+        "title": "Gas price",
+        "description": "Plenitude does not expose the price of the offer: enter it to get the cost too. If you change it, the cost of the whole history is recomputed. Other costs (fixed fees, charges per Smc, VAT) are added with **Add cost** in the integration page: for a gas supply the costs \"per kWh\" are per Smc.",
+        "data": {
+          "price_mode": "Price type"
+        }
+      },
+      "gas_price": {
+        "title": "Gas price per Smc",
+        "description": "Price of the gas in euro per standard cubic metre (Smc), as in your offer, with a comma or a point for the decimals. Charges per Smc that are not in this price (transport, system charges, excise duty) can be added as costs \"per kWh\", which for gas are per Smc.",
+        "data": {
+          "price": "Price"
+        },
+        "data_description": {
+          "price": "Euro per Smc."
+        }
       }
     },
     "error": {
-      "invalid_price": "Enter a price between 0 and 10 euro per kWh, with a comma or a point for the decimals (at most 6), without thousands separators."
+      "invalid_price": "Enter a price between 0 and 10 euro, with a comma or a point for the decimals (at most 6), without thousands separators."
     }
   },
   "selector": {
@@ -88,7 +105,7 @@
         "bimonthly": "Every two months",
         "yearly": "Yearly",
         "per_kw_monthly": "Per kW per month",
-        "per_kwh": "Per kWh",
+        "per_kwh": "Per kWh (per Smc for gas)",
         "percent": "Percentage (VAT, for example)"
       }
     }
@@ -103,6 +120,15 @@
       },
       "costo_ultimo_giorno": {
         "name": "Consumption cost of the last day"
+      },
+      "ultimo_mese": {
+        "name": "Last month available"
+      },
+      "consumo_ultimo_mese": {
+        "name": "Gas consumption of the last month"
+      },
+      "costo_ultimo_mese": {
+        "name": "Gas cost of the last month"
       }
     }
   },

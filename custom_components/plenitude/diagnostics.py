@@ -34,6 +34,7 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: Plenitu
     return {
         "integration_version": VERSION,
         "server_language": coordinator.language,
+        "commodity": coordinator.commodity,
         "entry": {
             "title": REDACTED,
             "data": async_redact_data(dict(entry.data), TO_REDACT),

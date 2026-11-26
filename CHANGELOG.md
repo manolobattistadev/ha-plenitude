@@ -4,6 +4,21 @@ All notable changes to this project are listed here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [semantic versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- **Gas supplies.** The configuration offers the gas supplies too (one entry per supply). The customer area gives gas
+  one value per month: the integration writes one value per day in m³ (`plenitude:gas_<key>_consumo`), the real days
+  where the meter sends them, otherwise the month spread evenly over its days, ready for the gas section of the Energy
+  dashboard. With a price per Smc or costs, also the cost (`plenitude:gas_<key>_costo`). Sensors: last month
+  available, its consumption and its cost. The cards stay electricity only.
+- `scripts/prototipo.py gas`: prints the shape of the answers for a gas supply, values masked.
+
+### Fixed
+- The energy profile has one entry per commodity, and both carry the POD: the electricity supply could take the
+  contract and the house of the gas entry when the server listed it first. The entries are now told apart by
+  `clientType`.
+
 ## [0.5.4] - 2026-11-24
 
 ### Fixed

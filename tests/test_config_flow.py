@@ -13,8 +13,8 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.plenitude.api import PlenitudeAuthError, PlenitudeSessionExpired, Supply
 from custom_components.plenitude.bands import PRICE_MODE
-from custom_components.plenitude.config_flow import _electric_supplies
-from custom_components.plenitude.const import CONF_SUPPLY, DOMAIN, supply_key
+from custom_components.plenitude.config_flow import _usable_supplies
+from custom_components.plenitude.const import COMMODITY_POWER, CONF_COMMODITY, CONF_SUPPLY, DOMAIN, supply_key
 
 from .conftest import POD, FakeClient, FakePortal
 
@@ -34,7 +34,7 @@ def no_setup():
 
 def login_returns(value=None, error=None):
     return patch(
-        "custom_components.plenitude.config_flow._electric_supplies", AsyncMock(return_value=value, side_effect=error)
+        "custom_components.plenitude.config_flow._usable_supplies", AsyncMock(return_value=value, side_effect=error)
     )
 
 
@@ -47,7 +47,7 @@ async def test_single_supply(hass: HomeAssistant, language: str, title: str) -> 
         result = await hass.config_entries.flow.async_configure(result["flow_id"], CREDENTIALS)
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert result["title"] == title
-    assert result["data"] == {**CREDENTIALS, CONF_SUPPLY: supply_key(POD)}
+    assert result["data"] == {**CREDENTIALS, CONF_SUPPLY: supply_key(POD), CONF_COMMODITY: COMMODITY_POWER}
     assert POD not in str(result["data"])  # only the hash of the POD is stored
     assert result["options"] == {PRICE_MODE: "none"}
 
@@ -299,9 +299,9 @@ async def test_the_throw_away_login_is_closed(hass: HomeAssistant, refused: bool
     with patch("custom_components.plenitude.config_flow.PlenitudeClient", return_value=client):
         if refused:
             with pytest.raises(PlenitudeSessionExpired):
-                await _electric_supplies(hass, "test@example.com", "secret")
+                await _usable_supplies(hass, "test@example.com", "secret")
         else:
-            assert len(await _electric_supplies(hass, "test@example.com", "secret")) == 1
+            assert len(await _usable_supplies(hass, "test@example.com", "secret")) == 1
     assert (portal.logins, portal.logouts) == (1, 1)
 
 
@@ -322,7 +322,7 @@ async def test_no_usable_supply_is_described_without_codes(hass: HomeAssistant) 
     logger.addHandler(handler)
     try:
         with patch("custom_components.plenitude.config_flow.PlenitudeClient", return_value=client):
-            assert await _electric_supplies(hass, "test@example.com", "secret") == []
+            assert await _usable_supplies(hass, "test@example.com", "secret") == []
     finally:
         logger.removeHandler(handler)
     assert any("supplies of the account: GAS (ATTIVO, RETAIL, analysis no)" in m for m in messages)

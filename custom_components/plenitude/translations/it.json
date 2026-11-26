@@ -15,7 +15,7 @@
       },
       "supply": {
         "title": "Fornitura",
-        "description": "Nell'account ci sono più forniture luce: scegli quella da importare. Per le altre aggiungi di nuovo l'integrazione.",
+        "description": "Nell'account ci sono più forniture con l'analisi dei consumi (luce o gas): scegli quella da importare. Per le altre aggiungi di nuovo l'integrazione.",
         "data": {
           "supply": "Fornitura"
         }
@@ -31,7 +31,7 @@
     "error": {
       "invalid_auth": "Credenziali rifiutate da Plenitude (o richiesta una verifica aggiuntiva).",
       "cannot_connect": "Impossibile contattare l'area clienti Plenitude (il motivo è nel log di Home Assistant).",
-      "no_supplies": "Nell'account non c'è una fornitura luce con l'analisi dei consumi.",
+      "no_supplies": "Nell'account non c'è una fornitura luce o gas con l'analisi dei consumi.",
       "supply_missing": "La fornitura configurata non è più in questo account.",
       "unknown": "Errore inatteso: vedi il log di Home Assistant.",
       "portal_refused": "Plenitude ha accettato il login, ma l'area clienti rifiuta i dati del conto. Controlla che l'area clienti funzioni da un browser, poi riprova più tardi. Se succede ancora, accendi il log di debug (vedi il README) e apri una segnalazione."
@@ -67,10 +67,27 @@
           "price_f3": "Euro per kWh, notti 23-7, domeniche e festivi.",
           "price_f23": "Euro per kWh in tutte le ore fuori dalla F1."
         }
+      },
+      "gas": {
+        "title": "Prezzo del gas",
+        "description": "Plenitude non espone il prezzo dell'offerta: indicalo tu per avere anche il costo. Se lo cambi, il costo di tutto lo storico viene ricalcolato. Gli altri costi (quote fisse, oneri per Smc, IVA) si aggiungono con **Aggiungi costo** nella pagina dell'integrazione: per una fornitura gas i costi \"per kWh\" sono per Smc.",
+        "data": {
+          "price_mode": "Tipo di prezzo"
+        }
+      },
+      "gas_price": {
+        "title": "Prezzo del gas per Smc",
+        "description": "Prezzo del gas in euro per metro cubo standard (Smc), come nella tua offerta, con la virgola o il punto per i decimali. Gli oneri per Smc che non sono in questo prezzo (trasporto, oneri di sistema, accise) si possono aggiungere come costi \"per kWh\", che per il gas sono per Smc.",
+        "data": {
+          "price": "Prezzo"
+        },
+        "data_description": {
+          "price": "Euro per Smc."
+        }
       }
     },
     "error": {
-      "invalid_price": "Inserisci un prezzo tra 0 e 10 euro per kWh, con la virgola o il punto per i decimali (al massimo 6), senza separatori delle migliaia."
+      "invalid_price": "Inserisci un prezzo tra 0 e 10 euro, con la virgola o il punto per i decimali (al massimo 6), senza separatori delle migliaia."
     }
   },
   "selector": {
@@ -88,7 +105,7 @@
         "bimonthly": "Bimestrale",
         "yearly": "Annuale",
         "per_kw_monthly": "€/kW al mese",
-        "per_kwh": "Per kWh",
+        "per_kwh": "Per kWh (per Smc per il gas)",
         "percent": "Percentuale (per esempio IVA)"
       }
     }
@@ -103,6 +120,15 @@
       },
       "costo_ultimo_giorno": {
         "name": "Costo dei consumi dell'ultimo giorno"
+      },
+      "ultimo_mese": {
+        "name": "Ultimo mese disponibile"
+      },
+      "consumo_ultimo_mese": {
+        "name": "Consumo gas dell'ultimo mese"
+      },
+      "costo_ultimo_mese": {
+        "name": "Costo gas dell'ultimo mese"
       }
     }
   },
